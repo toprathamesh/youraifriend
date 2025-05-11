@@ -1,0 +1,13 @@
+[
+  {
+    "question": "What is diabetes?",
+    "context": "Diabetes is a chronic condition that affects how your body turns food into energy. There are two main types: type 1 and type 2.",
+    "answer": "Diabetes is a chronic condition that affects how your body turns food into energy."
+  },
+  {
+    "question": "What are the symptoms of flu?",
+    "context": "The flu is a contagious respiratory illness. Common symptoms include fever, cough, sore throat, runny nose, body aches, and fatigue.",
+    "answer": "Fever, cough, sore throat, runny nose, body aches, and fatigue."
+  }
+]
+// Add more Q&A pairs or download the full MedQuAD dataset for better results. 
