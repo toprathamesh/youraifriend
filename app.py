@@ -7,7 +7,7 @@ from flask_cors import CORS
 import google.generativeai as genai
 from google.generativeai import types
 from dotenv import load_dotenv
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import re
 import pdfplumber
 import fitz  # PyMuPDF
@@ -391,14 +391,13 @@ def analyze_document():
         try:
             document_text = ""
             if file.filename.lower().endswith('.pdf'):
-                # Use PyMuPDF (fitz) to read the PDF from the in-memory file stream
-                pdf_document = fitz.open(stream=file.read(), filetype="pdf")
-                for page in pdf_document:
-                    document_text += page.get_text()
-                pdf_document.close()
+                # Use pypdf to read the PDF from the in-memory file stream
+                reader = PdfReader(file)
+                for page in reader.pages:
+                    document_text += page.extract_text() or ""
             else:
                 # Handle plain text files
-                file.seek(0) # Reset stream position
+                file.seek(0)  # Reset stream position
                 document_text = file.read().decode('utf-8', errors='replace')
             
             if not document_text.strip():
