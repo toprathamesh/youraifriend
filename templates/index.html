@@ -828,7 +828,6 @@
 
             <div class="mode-selector">
                 <button class="mode-btn active" data-mode="chat">💬 Chat</button>
-                <button class="mode-btn" data-mode="image">🎨 Generate Image</button>
                 <button class="mode-btn" data-mode="document">📄 Analyze Document</button>
             </div>
 
@@ -855,8 +854,8 @@
                     <span id="file-name-display"></span>
                     <textarea id="message-input" placeholder="Type your message..." rows="1"></textarea>
                     <button id="send-button" title="Send message">
-                        Send
-                    </button>
+                            Send
+                        </button>
                 </div>
             </div>
         </div>
@@ -920,6 +919,10 @@
             const fileNameDisplay = document.getElementById('file-name-display');
             const memoryToggle = document.getElementById('memory-toggle');
             const memoryPanel = document.getElementById('memory-panel');
+            const memoryKeyInput = document.getElementById('memory-key');
+            const memoryValueInput = document.getElementById('memory-value');
+            const memorySaveBtn = document.getElementById('memory-save');
+            const memoryItemsContainer = document.getElementById('memory-items');
 
             function getSessionId() {
                 let sessionId = localStorage.getItem('chat_session_id');
@@ -933,11 +936,11 @@
             function displayMessage(sender, text, image_data = null) {
                 const messageGroup = document.createElement('div');
                 messageGroup.className = `message-group ${sender}-message`;
-
+                
                 const avatar = document.createElement('div');
                 avatar.className = 'message-avatar';
                 avatar.textContent = sender === 'user' ? 'You' : 'AI';
-
+                
                 const bubble = document.createElement('div');
                 bubble.className = 'message-bubble';
 
@@ -989,9 +992,7 @@
 
                 if (!userMessage) return;
 
-                const messageToSend = currentMode === 'image' ? `Generate an image of: ${userMessage}` : userMessage;
-                
-                displayMessage('user', messageToSend);
+                displayMessage('user', userMessage);
                 typingIndicator.classList.add('show');
                 messageInput.value = '';
                 messageInput.focus();
@@ -1001,7 +1002,7 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            message: messageToSend,
+                            message: userMessage,
                             session_id: getSessionId(),
                             personality: document.getElementById('personality').value
                         })
@@ -1066,16 +1067,9 @@
                     if (currentMode === 'document') {
                         fileUploadLabel.style.display = 'flex';
                         messageInput.placeholder = 'Type a prompt for the document...';
-                    } else if (currentMode === 'image') {
-                        fileUploadLabel.style.display = 'none';
-                        messageInput.placeholder = 'Describe the image you want to generate...';
-                        docFileInput.value = '';
-                        fileNameDisplay.textContent = '';
                     } else {
                         fileUploadLabel.style.display = 'none';
                         messageInput.placeholder = 'Type your message...';
-                        docFileInput.value = '';
-                        fileNameDisplay.textContent = '';
                     }
                 }
             });
@@ -1124,11 +1118,61 @@
                 }
             });
 
+            // --- MEMORY MANAGEMENT ---
+            async function loadMemoryItems() {
+                try {
+                    const response = await fetch('/memory');
+                    if (!response.ok) throw new Error('Failed to load memory.');
+                    const data = await response.json();
+                    
+                    memoryItemsContainer.innerHTML = '';
+                    for (const [key, value] of Object.entries(data.memory_items || {})) {
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'memory-item';
+                        itemEl.innerHTML = `
+                            <div class="memory-key">${key}</div>
+                            <div class="memory-value">${value}</div>
+                        `;
+                        memoryItemsContainer.appendChild(itemEl);
+                    }
+                } catch (error) {
+                    console.error('Error loading memory:', error);
+                }
+            }
+
+            async function saveMemoryItem() {
+                const key = memoryKeyInput.value.trim();
+                const value = memoryValueInput.value.trim();
+                if (!key || !value) return;
+
+                try {
+                    const response = await fetch('/memory', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key, value }),
+                    });
+                    if (response.ok) {
+                        memoryKeyInput.value = '';
+                        memoryValueInput.value = '';
+                        loadMemoryItems();
+                    }
+                } catch (error) {
+                    console.error('Error saving memory:', error);
+                }
+            }
+            
             if (memoryToggle) {
                 memoryToggle.addEventListener('click', () => {
                     memoryPanel.classList.toggle('open');
                     memoryToggle.classList.toggle('active');
+                    if (memoryPanel.classList.contains('open')) {
+                        loadMemoryItems();
+                    }
                 });
+            }
+
+            if (memorySaveBtn) {
+                memorySaveBtn.addEventListener('click', saveMemoryItem);
             }
         });
     </script>
