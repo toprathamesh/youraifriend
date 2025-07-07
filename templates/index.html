@@ -887,16 +887,6 @@
             cursor: pointer;
         }
         
-        .edit-save {
-            background: #1f1f1f;
-            color: #fff;
-        }
-        
-        .edit-cancel {
-            background: #eee;
-            color: #333;
-        }
-        
         .confirmation-overlay {
             position: fixed;
             top: 0;
@@ -1065,6 +1055,27 @@
             const cancelDeleteBtn = document.getElementById('confirm-cancel');
             let keyToDelete = null;
 
+            // --- EVENT LISTENERS ---
+            if (memoryToggle) {
+                memoryToggle.addEventListener('click', () => {
+                    memoryPanel.classList.toggle('visible');
+                    if (memoryPanel.classList.contains('visible')) {
+                        loadMemoryItems();
+                    }
+                });
+            }
+
+            if (memoryClose) {
+                memoryClose.addEventListener('click', () => {
+                    memoryPanel.classList.remove('visible');
+                });
+            }
+
+            if (memorySaveBtn) {
+                memorySaveBtn.addEventListener('click', saveMemoryItem);
+            }
+
+            // --- CHAT LOGIC ---
             function getSessionId() {
                 let sessionId = localStorage.getItem('chat_session_id');
                 if (!sessionId) {
@@ -1317,19 +1328,6 @@
                 }
             }
             
-            if (memoryToggle) {
-                memoryToggle.addEventListener('click', () => {
-                    memoryPanel.classList.toggle('visible');
-                    if (memoryPanel.classList.contains('visible')) {
-                        loadMemoryItems();
-                    }
-                });
-            }
-
-            if (memorySaveBtn) {
-                memorySaveBtn.addEventListener('click', saveMemoryItem);
-            }
-
             function showDeleteConfirmation(key) {
                 keyToDelete = key;
                 confirmationOverlay.style.display = 'flex';
@@ -1403,4 +1401,4 @@
         });
     </script>
 </body>
-</html> 
+</html>
