@@ -8,6 +8,7 @@ import google.generativeai as genai
 from google.generativeai import types
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
+import re
 
 # Load environment variables
 load_dotenv()
@@ -15,11 +16,16 @@ load_dotenv()
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# Configure Gemini API
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-if not GEMINI_API_KEY:
+# --- App Configuration ---
+class Config:
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    DEFAULT_MODEL = 'gemini-2.5-flash'
+    IMAGE_GEN_MODEL = 'gemini-2.0-flash-preview-image-generation'
+    # Add other configurations like temperature, top_p etc. if needed
+    
+if not Config.GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable is required")
-genai.configure(api_key=GEMINI_API_KEY)
+genai.configure(api_key=Config.GEMINI_API_KEY)
 
 # Initialize the model
 # The model will be dynamically selected in the chat function
@@ -191,93 +197,120 @@ class MemoryManager:
 # Initialize memory manager
 memory = MemoryManager()
 
+# --- AI Core Logic ---
+def get_ai_response(user_message, session_id, personality):
+    """
+    Core function to get a response from the Gemini API, handling both
+    text and image generation.
+    """
+    memory = MemoryManager()
+    conversation_history = memory.get_conversation_history(session_id)
+    user_profile = memory.get_user_info()
+
+    # 1. Detect Intent: Check if it's an image generation request
+    image_keywords = ['image', 'picture', 'photo', 'generate', 'create']
+    is_image_request = any(keyword in user_message.lower() for keyword in image_keywords)
+
+    model_name = Config.IMAGE_GEN_MODEL if is_image_request else Config.DEFAULT_MODEL
+    model = genai.GenerativeModel(model_name)
+
+    # 2. Construct the Prompt and History
+    system_prompt = _build_system_prompt(user_profile, personality, is_image_request)
+    
+    try:
+        if is_image_request:
+            return _generate_multimodal_content(model, system_prompt, user_message)
+        else:
+            return _generate_text_content(model, system_prompt, conversation_history, user_message)
+            
+    except Exception as e:
+        # More specific error handling can be added here
+        print(f"Error during AI response generation: {e}")
+        raise
+
+def _build_system_prompt(user_profile, personality, is_image_request):
+    """Builds a structured system prompt for the AI."""
+    prompt_template = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['default'])
+    
+    profile_summary = "You don't have any personal information about me yet."
+    if user_profile:
+        profile_summary = "Here's what you know about me:\n"
+        for key, value in user_profile.items():
+            profile_summary += f"- {key}: {value}\n"
+            
+    # Instructions for image generation
+    image_instructions = ""
+    if is_image_request:
+        image_instructions = (
+            "\n--- IMAGE GENERATION INSTRUCTIONS ---\n"
+            "The user wants an image. Interpret their request creatively. "
+            "Your text response should be a brief, engaging description of the generated image, "
+            "matching your personality."
+        )
+
+    return f"{prompt_template}\n\n--- MY PROFILE ---\n{profile_summary}\n{image_instructions}"
+
+def _generate_text_content(model, system_prompt, conversation_history, user_message):
+    """Generates a text-only response using conversation history."""
+    # The new SDK prefers a clean history object.
+    # The system prompt is now passed separately.
+    chat_session = model.start_chat(
+        history=[
+            {"role": "user", "parts": [system_prompt]},
+            {"role": "model", "parts": ["Understood. I am ready to help."]}
+        ]
+    )
+    
+    # Add past conversations to the history
+    for user_msg, assistant_msg, _ in conversation_history:
+        chat_session.history.append({"role": "user", "parts": [user_msg]})
+        chat_session.history.append({"role": "model", "parts": [assistant_msg]})
+        
+    response = chat_session.send_message(user_message)
+    return {"response": response.text}
+
+def _generate_multimodal_content(model, system_prompt, user_message):
+    """Generates a response with both text and an image."""
+    response = model.generate_content(
+        [system_prompt, user_message],
+        generation_config=genai.types.GenerationConfig(
+            response_modalities=["TEXT", "IMAGE"]
+        )
+    )
+    return {
+        "response": response.candidates[0].content.parts[0].text,
+        "image_data": response.candidates[0].content.parts[1].image.data.decode('utf-8')
+    }
+    
+# --- Memory Extraction ---
 def extract_memory_from_message(message):
-    """Extract personal information from user messages"""
+    """
+    Extracts personal information from user messages using regex for better accuracy.
+    """
     extracted = {}
-    message_lower = message.lower()
     
-    # Name extraction
-    if 'my name is' in message_lower:
-        name = message_lower.split('my name is')[1].strip().split()[0]
-        extracted['Name'] = name.title()
-    elif 'i am' in message_lower and any(word in message_lower for word in ['called', 'named']):
-        parts = message_lower.split('i am')[1].strip()
-        if 'called' in parts:
-            name = parts.split('called')[1].strip().split()[0]
-            extracted['Name'] = name.title()
-    
-    # Job/work extraction
-    if 'i work' in message_lower:
-        work = message_lower.split('i work')[1].strip()
-        if work.startswith('as'):
-            work = work[2:].strip()
-        elif work.startswith('at'):
-            work = work[2:].strip()
-        extracted['Work'] = work.title()
-    elif 'my job is' in message_lower:
-        job = message_lower.split('my job is')[1].strip()
-        extracted['Job'] = job.title()
-    
-    # Location extraction
-    if 'i live in' in message_lower:
-        location = message_lower.split('i live in')[1].strip().split()[0]
-        extracted['Location'] = location.title()
-    elif 'i am from' in message_lower:
-        location = message_lower.split('i am from')[1].strip().split()[0]
-        extracted['Location'] = location.title()
-    
-    # Preferences extraction
-    if 'i love' in message_lower:
-        love = message_lower.split('i love')[1].strip()
-        extracted['Loves'] = love
-    elif 'i like' in message_lower:
-        like = message_lower.split('i like')[1].strip()
-        extracted['Likes'] = like
-    
-    # Age extraction
-    if 'i am' in message_lower and 'years old' in message_lower:
-        age_part = message_lower.split('i am')[1].split('years old')[0].strip()
-        if age_part.isdigit():
-            extracted['Age'] = age_part
-    
+    # More robust extraction using regex with case-insensitivity
+    patterns = {
+        "Name": r"my name is ([\w]+)|i'm ([\w]+)|i am ([\w]+)",
+        "Job": r"i work as an? ([\w\s]+)|my job is ([\w\s]+)|i am an? ([\w\s]+)",
+        "Location": r"i live in ([\w\s]+)|i'm from ([\w\s]+)",
+        "Loves": r"i love ([\w\s]+)",
+        "Likes": r"i like ([\w\s]+)",
+        "Age": r"i am ([\d]+) years old"
+    }
+
+    for key, pattern in patterns.items():
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            # Find the first non-empty group
+            value = next((g for g in match.groups() if g), None)
+            if value:
+                # Basic cleaning
+                extracted[key] = value.strip().title()
+
     return extracted
 
-def create_context_prompt(user_message, conversation_history, user_profile, personality='loving', is_image_request=False):
-    """Create a context-rich prompt for Gemini"""
-    
-    # Select personality prompt
-    personality_prompt = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['default'])
-    
-    # Build conversation context
-    context_parts = [personality_prompt]
-
-    if is_image_request:
-        context_parts.append("Image Generation Instructions:")
-        context_parts.append("- You are creating a new image based on the user's request.")
-        context_parts.append("- Interpret the user's description creatively and generate a high-quality, relevant image.")
-        context_parts.append("- After generating, provide a brief, engaging text description of the image, matching your personality.")
-        context_parts.append("")
-
-    if user_profile:
-        context_parts.append("What I know about you:")
-        for key, value in user_profile.items():
-            context_parts.append(f"- {key}: {value}")
-        context_parts.append("")
-    
-    if conversation_history:
-        context_parts.append("Our previous conversations:")
-        for user_msg, assistant_msg, timestamp in conversation_history[-10:]:  # Last 10 exchanges
-            context_parts.append(f"You: {user_msg}")
-            context_parts.append(f"Me: {assistant_msg}")
-        context_parts.append("")
-    
-    context_parts.append("Current message:")
-    context_parts.append(f"You: {user_message}")
-    context_parts.append("")
-    
-    full_prompt = "\n".join(context_parts)
-    return full_prompt
-
+# --- Flask Routes ---
 @app.route('/')
 def index():
     """Serve the chat interface"""
@@ -293,80 +326,28 @@ def chat():
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
-
-    # Detect image generation request
-    image_keywords = ['image', 'picture', 'photo', 'generate']
-    is_image_request = any(keyword in user_message.lower() for keyword in image_keywords)
-
-    # Select model based on request type
-    if is_image_request:
-        model = genai.GenerativeModel('gemini-2.0-flash-preview-image-generation')
-    else:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-
-    # Extract memories from the new message
-    extracted_info = extract_memory_from_message(user_message)
-    if extracted_info:
-        for key, value in extracted_info.items():
-            memory.update_user_info(key, value)
-
-    # Get context
-    conversation_history = memory.get_conversation_history(session_id)
-    user_profile = memory.get_user_info()
-
-    # Create a rich prompt
-    prompt = create_context_prompt(user_message, conversation_history, user_profile, personality, is_image_request)
-
+        
     try:
-        if is_image_request:
-            # Generate both text and image
-            response = model.generate_content(
-                [prompt, user_message],
-                generation_config=genai.types.GenerationConfig(
-                    response_modalities=["TEXT", "IMAGE"]
-                )
-            )
-            assistant_response = response.candidates[0].content.parts[0].text
-            image_data = response.candidates[0].content.parts[1].image.data
-        else:
-            # Start a chat with history
-            chat_session = model.start_chat(history=[])
-            
-            # Construct a proper history list
-            history_for_model = []
-            if conversation_history:
-                for user_msg, assistant_msg, timestamp in conversation_history:
-                    history_for_model.append({"role": "user", "parts": [user_msg]})
-                    history_for_model.append({"role": "model", "parts": [assistant_msg]})
-            
-            # Prepend the system prompt and user profile info
-            system_prompt = [PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['default'])]
-            if user_profile:
-                profile_text = "Here is what you know about me: " + json.dumps(user_profile)
-                system_prompt.append(profile_text)
-
-            # Insert the system prompt at the beginning of the history
-            chat_session.history = [
-                {"role": "user", "parts": system_prompt},
-                {"role": "model", "parts": ["Understood."]} # Prime the model
-            ] + history_for_model
-
-            response = chat_session.send_message(user_message)
-            assistant_response = response.text
-
-        # Save conversation
-        memory.save_conversation(user_message, assistant_response, session_id)
-
-        if is_image_request:
-            return jsonify({
-                "response": assistant_response,
-                "image_data": image_data.decode('utf-8')
-            })
-        else:
-            return jsonify({"response": assistant_response})
+        # 1. Extract and save memories from the user's message
+        extracted_info = extract_memory_from_message(user_message)
+        if extracted_info:
+            memory = MemoryManager()
+            for key, value in extracted_info.items():
+                memory.update_user_info(key, value)
+                
+        # 2. Get AI response
+        ai_response = get_ai_response(user_message, session_id, personality)
+        
+        # 3. Save the conversation to memory
+        memory = MemoryManager()
+        memory.save_conversation(user_message, ai_response.get("response"), session_id)
+        
+        return jsonify(ai_response)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # A more robust error handling can distinguish between API errors vs. others
+        print(f"An error occurred in /chat: {e}")
+        return jsonify({"error": "An internal server error occurred. Please try again later."}), 500
 
 @app.route('/history', methods=['GET'])
 def get_history():
