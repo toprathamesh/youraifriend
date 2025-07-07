@@ -189,27 +189,97 @@ class MemoryManager:
 # Initialize memory manager
 memory = MemoryManager()
 
-def extract_memory_from_message(message):
+def analyze_and_extract_memory(text, model):
+    """
+    Use the generative model to analyze a snippet of text and extract a key-value pair
+    for memory storage.
+    """
+    if not text:
+        return None, None
+    
+    prompt = f"""
+    You are an intelligent memory assistant. Your task is to analyze the following text and extract a key-value pair that represents the core information to be remembered. The key should be a concise category (e.g., "Favorite Color", "Cat's Name", "Workplace"), and the value should be the specific detail.
+
+    - If the text is a simple fact, extract it directly.
+    - If the text is a preference, identify what is liked or disliked.
+    - If it's a personal detail, categorize it appropriately.
+    - If no clear key-value pair can be determined, return "None" for both.
+
+    Example 1:
+    Text: "my favorite color is blue"
+    Key: "Favorite Color"
+    Value: "blue"
+
+    Example 2:
+    Text: "I work at a software company"
+    Key: "Workplace"
+    Value: "A software company"
+
+    Example 3:
+    Text: "i really love eating pizza"
+    Key: "Loves"
+    Value: "eating pizza"
+
+    Now, analyze this text:
+    Text: "{text}"
+
+    Respond with the key and value on separate lines, with no extra formatting.
+    Key:
+    Value:
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        
+        # Check if the response text has content
+        if not response.text or not response.text.strip():
+            return None, None
+            
+        lines = response.text.strip().split('\n')
+        
+        # Find the key and value from the response
+        key, value = None, None
+        for line in lines:
+            if line.lower().startswith('key:'):
+                key = line.split(':', 1)[1].strip()
+            elif line.lower().startswith('value:'):
+                value = line.split(':', 1)[1].strip()
+        
+        if key and value and key.lower() != 'none' and value.lower() != 'none':
+            return key.title(), value
+        else:
+            return None, None
+
+    except Exception as e:
+        print(f"Error during memory analysis: {e}")
+        return None, None
+
+def extract_memory_from_message(message, model):
     """Extract personal information from user messages"""
     extracted = {}
     message_lower = message.lower()
     
     # Generic memory phrases
-    remember_phrases = ["remember that", "don't forget that", "store this information", "save this"]
+    remember_phrases = [
+        "remember that", "don't forget that", "store this information", 
+        "save this", "save that", "remind me that", "save it to your memory", 
+        "add it to memory", "keep this in mind", "make a note of this",
+        "don't forget"
+    ]
     for phrase in remember_phrases:
         if phrase in message_lower:
             # Extract the content to be remembered. This is a simple implementation.
             # It assumes the fact to remember comes after "that" or the phrase.
             try:
-                content_part = message_lower.split(phrase)[1].strip()
+                content_part = message.split(phrase, 1)[1].strip()
                 if ":" in content_part:
                     key, value = content_part.split(":", 1)
                     extracted[key.strip().title()] = value.strip()
                 else:
-                    # If no key is specified, we might need a more sophisticated way
-                    # to generate a key or decide to store it as a general note.
-                    # For now, we can use a generic key or skip.
-                    pass # Or extracted['General Note'] = content_part
+                    # If no key is specified, use the AI to figure it out
+                    key, value = analyze_and_extract_memory(content_part, model)
+                    if key and value:
+                        extracted[key] = value
             except IndexError:
                 pass # Phrase was likely at the end of the sentence
     
@@ -307,7 +377,7 @@ def chat():
     model = genai.GenerativeModel('gemini-2.5-flash')
 
     # Extract memories from the new message
-    extracted_info = extract_memory_from_message(user_message)
+    extracted_info = extract_memory_from_message(user_message, model)
     if extracted_info:
         for key, value in extracted_info.items():
             memory.update_user_info(key, value)
