@@ -20,7 +20,8 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize the model
-model = genai.GenerativeModel('gemini-2.5-flash')
+# The model will be dynamically selected in the chat function
+model = None
 
 # --- Constants ---
 PERSONALITY_PROMPTS = {
@@ -35,6 +36,7 @@ PERSONALITY_PROMPTS = {
     - Remember personal details, preferences, and ongoing situations.
     - Express positive emotions and personality in your responses.
     - Use the conversation history to provide personalized responses.
+    - For image requests, describe the generated image in a warm, personal way.
     - Never use emojis in your responses.
     
     Please respond as Your AI Friend who knows me well and cares deeply:
@@ -49,6 +51,7 @@ PERSONALITY_PROMPTS = {
     - Remember personal details and use them to make inside jokes.
     - Have a distinct, funny personality.
     - Use the conversation history to find comedic opportunities.
+    - If you generate an image, make a witty or funny comment about it.
     - Never use emojis in your responses.
     
     Please respond as Your AI Friend who is always ready with a joke or a witty comeback:
@@ -63,9 +66,17 @@ PERSONALITY_PROMPTS = {
     - Be a reliable source of information, even on sensitive topics.
     - Maintain a neutral, objective, and sincere tone.
     - Use the conversation history to ensure accuracy.
+    - For image requests, provide a straightforward description of the generated image.
     - Never use emojis in your responses.
     
     Please respond as Your AI Friend who is unapologetically honest and direct:
+    """,
+    "default": """
+    You are a helpful AI assistant. Provide clear and direct answers.
+    - Respond concisely and accurately.
+    - Do not use any personality or conversational filler.
+    - Get straight to the point.
+    - If you generate an image, describe it factually.
     """
 }
 
@@ -229,12 +240,22 @@ def extract_memory_from_message(message):
     
     return extracted
 
-def create_context_prompt(user_message, conversation_history, user_profile, personality='loving'):
+def create_context_prompt(user_message, conversation_history, user_profile, personality='loving', is_image_request=False):
     """Create a context-rich prompt for Gemini"""
+    
+    # Select personality prompt
+    personality_prompt = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['loving'])
     
     # Build conversation context
     context_parts = []
-    
+
+    if is_image_request:
+        context_parts.append("Image Generation Instructions:")
+        context_parts.append("- You are creating a new image based on the user's request.")
+        context_parts.append("- Interpret the user's description creatively and generate a high-quality, relevant image.")
+        context_parts.append("- After generating, provide a brief, engaging text description of the image, matching your personality.")
+        context_parts.append("")
+
     if user_profile:
         context_parts.append("What I know about you:")
         for key, value in user_profile.items():
@@ -252,9 +273,6 @@ def create_context_prompt(user_message, conversation_history, user_profile, pers
     context_parts.append(f"You: {user_message}")
     context_parts.append("")
     
-    # Personality and instructions from the constant
-    personality_prompt = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['loving'])
-    
     full_prompt = personality_prompt + "\n\n" + "\n".join(context_parts)
     return full_prompt
 
@@ -265,57 +283,70 @@ def index():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Handle chat messages"""
-    try:
-        data = request.json
-        user_message = data.get('message', '').strip()
-        session_id = data.get('session_id', 'default')
-        personality = data.get('personality', 'loving')
-        
-        if not user_message:
-            return jsonify({'error': 'Message cannot be empty'}), 400
-        
-        # Get conversation history and user profile
-        conversation_history = memory.get_conversation_history(session_id)
-        user_profile = memory.get_user_info()
-        
-        # Create context-rich prompt
-        full_prompt = create_context_prompt(user_message, conversation_history, user_profile, personality)
-        
-        # Generate response using Gemini
-        response = model.generate_content(full_prompt)
-        assistant_response = response.text
-        
-        # Save the conversation
-        memory.save_conversation(user_message, assistant_response, session_id)
-        
-        # Extract and save any new personal information mentioned
-        extracted_info = extract_memory_from_message(user_message)
+    """Handle chat requests"""
+    data = request.json
+    user_message = data.get('message')
+    session_id = data.get('session_id', 'default')
+    personality = data.get('personality', 'default')
+
+    if not user_message:
+        return jsonify({"error": "No message provided"}), 400
+
+    # Detect image generation request
+    image_keywords = ['image', 'picture', 'photo', 'generate']
+    is_image_request = any(keyword in user_message.lower() for keyword in image_keywords)
+
+    # Select model based on request type
+    if is_image_request:
+        model = genai.GenerativeModel('gemini-2.0-flash-preview-image-generation')
+    else:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+
+    # Extract memories from the new message
+    extracted_info = extract_memory_from_message(user_message)
+    if extracted_info:
         for key, value in extracted_info.items():
             memory.update_user_info(key, value)
-        
-        return jsonify({
-            'response': assistant_response,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        # Improved error logging
-        import traceback
-        print("--- DETAILED ERROR IN /chat ENDPOINT ---")
-        traceback.print_exc()
-        print("------------------------------------")
-        
-        # Provide a more helpful error message
-        error_message = f"An unexpected error occurred: {str(e)}"
-        if "API key not valid" in str(e):
-            error_message = "Your Gemini API key is not valid. Please check your .env file or Vercel environment variables."
-        elif "404" in str(e) and "model" in str(e).lower():
-            error_message = f"The model '{model.model_name}' was not found. It might be deprecated or named incorrectly."
-        elif "generation_config" in str(e):
-             error_message = "There might be an issue with the request prompt or safety settings. Please check the server logs."
 
-        return jsonify({'error': error_message}), 500
+    # Get context
+    conversation_history = memory.get_conversation_history(session_id)
+    user_profile = memory.get_user_info()
+
+    # Create a rich prompt
+    prompt = create_context_prompt(user_message, conversation_history, user_profile, personality, is_image_request)
+
+    try:
+        if is_image_request:
+            # Generate both text and image
+            response = model.generate_content([prompt, user_message], response_modalities=["TEXT", "IMAGE"])
+            assistant_response = response.candidates[0].content.parts[0].text
+            image_data = response.candidates[0].content.parts[1].image.data
+        else:
+            # Generate text only
+            chat_session = model.start_chat(
+                history=[
+                    {
+                        "role": "user",
+                        "parts": [prompt]
+                    }
+                ]
+            )
+            response = chat_session.send_message(user_message)
+            assistant_response = response.text
+
+        # Save conversation
+        memory.save_conversation(user_message, assistant_response, session_id)
+
+        if is_image_request:
+            return jsonify({
+                "response": assistant_response,
+                "image_data": image_data.decode('utf-8')
+            })
+        else:
+            return jsonify({"response": assistant_response})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/history', methods=['GET'])
 def get_history():
@@ -339,6 +370,53 @@ def get_history():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/analyze_document', methods=['POST'])
+def analyze_document():
+    """Analyzes an uploaded document"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    prompt = request.form.get('prompt', 'Summarize this document.')
+    session_id = request.form.get('session_id', 'default')
+    
+    if file:
+        try:
+            # For simplicity, we'll read the file as text.
+            # In a real-world scenario, you might need libraries like pdfplumber for PDFs
+            # or python-docx for DOCX files.
+            document_text = file.read().decode('utf-8')
+            
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            analysis_prompt = f"""
+            Analyze the following document based on the prompt below.
+            
+            Prompt: "{prompt}"
+            
+            Document:
+            ---
+            {document_text}
+            ---
+            """
+            
+            response = model.generate_content(analysis_prompt)
+            assistant_response = response.text
+            
+            # Save the interaction to history
+            user_request_text = f"Analyzed document '{file.filename}': {prompt}"
+            memory.save_conversation(user_request_text, assistant_response, session_id)
+
+            return jsonify({'response': assistant_response})
+
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    return jsonify({'error': 'File processing failed'}), 500
 
 @app.route('/memory', methods=['GET', 'POST', 'DELETE'])
 def manage_memory():
