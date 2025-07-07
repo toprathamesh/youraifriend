@@ -953,7 +953,7 @@
                 </div>
             </header>
 
-            <div class="mode-selector">
+            <div class="mode-selector" id="mode-selector">
                 <button class="mode-btn active" data-mode="chat">💬 Chat</button>
                 <button class="mode-btn" data-mode="document">📄 Analyze Document</button>
             </div>
@@ -1033,44 +1033,75 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const chatWindow = document.getElementById('chat-window');
-            const chatInput = document.getElementById('chat-input');
-            const modeButtons = document.querySelectorAll('.mode-btn');
-            const fileInput = document.getElementById('file-input');
+            const messagesList = document.querySelector('.messages-list');
+            const chatContainer = document.querySelector('.chat-container');
+            const messageInput = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+            const typingIndicator = document.getElementById('typingIndicator');
+            const personalitySelector = document.getElementById('personality');
+            const modeSelector = document.getElementById('mode-selector');
+            const docFileInput = document.getElementById('document-file-input');
+            const fileUploadLabel = document.getElementById('file-upload-label');
+            const fileNameDisplay = document.getElementById('file-name-display');
+
             const memoryToggle = document.getElementById('memory-toggle');
-            const memoryPanel = document.getElementById('memory-panel');
-            const memoryClose = document.getElementById('memory-close');
-            const memoryKeyInput = document.getElementById('memory-key');
-            const memoryValueInput = document.getElementById('memory-value');
-            const memorySaveBtn = document.getElementById('memory-save');
-            const memoryItemsContainer = document.getElementById('memory-items');
-            const confirmationOverlay = document.getElementById('confirmation-overlay');
-            const confirmDeleteBtn = document.getElementById('confirm-delete');
-            const cancelDeleteBtn = document.getElementById('confirm-cancel');
+            const memoryPanel = document.getElementById('memoryPanel');
+            const memoryKeyInput = document.getElementById('memoryKey');
+            const memoryValueInput = document.getElementById('memoryValue');
+            const memorySaveBtn = document.getElementById('memorySave');
+            const memoryItemsContainer = document.getElementById('memoryItems');
+
+            const confirmationOverlay = document.getElementById('confirmationOverlay');
+            const confirmDeleteBtn = document.getElementById('confirmDelete');
+            const cancelDeleteBtn = document.getElementById('confirmCancel');
+            
             let keyToDelete = null;
-            let currentMode = 'chat'; // 'chat', 'image', or 'document'
-            let currentPersonality = 'default';
-            let attachedFile = null;
+            let currentMode = 'chat';
 
             // --- EVENT LISTENERS ---
             if (memoryToggle) {
                 memoryToggle.addEventListener('click', () => {
-                    memoryPanel.classList.toggle('visible');
-                    if (memoryPanel.classList.contains('visible')) {
+                    memoryPanel.classList.toggle('open');
+                    if (memoryPanel.classList.contains('open')) {
                         loadMemoryItems();
                     }
                 });
             }
 
-            if (memoryClose) {
-                memoryClose.addEventListener('click', () => {
-                    memoryPanel.classList.remove('visible');
-                });
+            if (memorySaveBtn) {
+                memorySaveBtn.addEventListener('click', () => saveMemoryItem());
             }
 
-            if (memorySaveBtn) {
-                memorySaveBtn.addEventListener('click', saveMemoryItem);
-            }
+            modeSelector.addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') {
+                    currentMode = e.target.dataset.mode;
+                    
+                    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+                    e.target.classList.add('active');
+
+                    if (currentMode === 'document') {
+                        fileUploadLabel.style.display = 'flex';
+                        messageInput.placeholder = 'Type a prompt for the document...';
+                    } else {
+                        fileUploadLabel.style.display = 'none';
+                        messageInput.placeholder = 'Type your message...';
+                    }
+                }
+            });
+
+            sendButton.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            docFileInput.addEventListener('change', () => {
+                if (docFileInput.files.length > 0) {
+                    fileNameDisplay.textContent = docFileInput.files[0].name;
+                }
+            });
 
             // --- CHAT LOGIC ---
             function getSessionId() {
@@ -1153,7 +1184,7 @@
                         body: JSON.stringify({
                             message: userMessage,
                             session_id: getSessionId(),
-                            personality: document.getElementById('personality').value
+                            personality: personalitySelector.value
                         })
                     });
 
@@ -1206,31 +1237,6 @@
                 }
             }
             
-            modeSelector.addEventListener('click', (e) => {
-                if (e.target.tagName === 'BUTTON') {
-                    currentMode = e.target.dataset.mode;
-                    
-                    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
-                    e.target.classList.add('active');
-
-                    if (currentMode === 'document') {
-                        fileUploadLabel.style.display = 'flex';
-                        messageInput.placeholder = 'Type a prompt for the document...';
-                    } else {
-                        fileUploadLabel.style.display = 'none';
-                        messageInput.placeholder = 'Type your message...';
-                    }
-                }
-            });
-
-            sendButton.addEventListener('click', sendMessage);
-            messageInput.addEventListener('keydown', (event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    sendMessage();
-                }
-            });
-
             async function loadHistory() {
                 try {
                     const response = await fetch(`/history?session_id=${getSessionId()}`);
@@ -1248,153 +1254,164 @@
                     console.error('Error loading history:', error);
                 }
             }
-
-            // Initialization
+            
+            // Initial load
             loadHistory();
 
-            function autoResizeTextarea() {
-                messageInput.style.height = 'auto';
-                messageInput.style.height = (messageInput.scrollHeight) + 'px';
-            }
-
-            messageInput.addEventListener('input', autoResizeTextarea);
-
-            docFileInput.addEventListener('change', () => {
-                if (docFileInput.files.length > 0) {
-                    fileNameDisplay.textContent = docFileInput.files[0].name;
-                } else {
-                    fileNameDisplay.textContent = '';
-                }
-            });
-
-            // --- MEMORY MANAGEMENT ---
-            async function loadMemoryItems() {
-                try {
-                    const response = await fetch('/memory');
-                    if (!response.ok) throw new Error('Failed to load memory.');
-                    const data = await response.json();
-                    
-                    memoryItemsContainer.innerHTML = '';
-                    for (const [key, value] of Object.entries(data.memory_items || {})) {
-                        const itemEl = document.createElement('div');
-                        itemEl.className = 'memory-item';
-                        itemEl.dataset.key = key;
-                        itemEl.innerHTML = `
-                            <div class="memory-item-header">
-                                <div class="memory-key">${key}</div>
-                                <div class="memory-actions">
-                                    <button class="memory-edit">✏️</button>
-                                    <button class="memory-delete">❌</button>
-                                </div>
-                            </div>
-                            <div class="memory-value">${value}</div>
-                            <div class="edit-form">
-                                 <input type="text" class="edit-input edit-key-input" value="${key}">
-                                 <textarea class="edit-input edit-value-input">${value}</textarea>
-                                 <div class="edit-buttons">
-                                     <button class="edit-save">Save</button>
-                                     <button class="edit-cancel">Cancel</button>
-                                 </div>
-                            </div>
-                        `;
-                        memoryItemsContainer.appendChild(itemEl);
-                    }
-                } catch (error) {
-                    console.error('Error loading memory:', error);
-                }
-            }
-
-            async function saveMemoryItem() {
-                const key = memoryKeyInput.value.trim();
-                const value = memoryValueInput.value.trim();
-                if (!key || !value) return;
-
-                try {
-                    const response = await fetch('/memory', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key, value }),
-                    });
-                    if (response.ok) {
-                        memoryKeyInput.value = '';
-                        memoryValueInput.value = '';
-                        loadMemoryItems();
-                    }
-                } catch (error) {
-                    console.error('Error saving memory:', error);
-                }
-            }
-            
-            function showDeleteConfirmation(key) {
+            // --- MEMORY LOGIC ---
+            function showConfirmation(key) {
                 keyToDelete = key;
                 confirmationOverlay.style.display = 'flex';
             }
 
-            function hideDeleteConfirmation() {
+            function hideConfirmation() {
                 keyToDelete = null;
                 confirmationOverlay.style.display = 'none';
             }
 
-            async function deleteMemoryItem() {
-                if (!keyToDelete) return;
+            confirmDeleteBtn.addEventListener('click', async () => {
+                if (keyToDelete) {
+                    await deleteMemoryItem(keyToDelete);
+                    hideConfirmation();
+                }
+            });
+
+            cancelDeleteBtn.addEventListener('click', hideConfirmation);
+
+            async function loadMemoryItems() {
                 try {
-                    await fetch('/memory', {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: keyToDelete }),
-                    });
-                    loadMemoryItems();
-                } catch (error) {
-                    console.error('Error deleting memory:', error);
-                } finally {
-                    hideDeleteConfirmation();
-                }
-            }
-
-            function handleMemoryItemInteraction(e) {
-                const target = e.target;
-                const memoryItem = target.closest('.memory-item');
-                if (!memoryItem) return;
-
-                const key = memoryItem.dataset.key;
-
-                if (target.classList.contains('memory-delete')) {
-                    showDeleteConfirmation(key);
-                }
-
-                if (target.classList.contains('memory-edit')) {
-                    memoryItem.querySelector('.edit-form').classList.add('active');
-                }
-
-                if (target.classList.contains('edit-cancel')) {
-                    memoryItem.querySelector('.edit-form').classList.remove('active');
-                }
-
-                if (target.classList.contains('edit-save')) {
-                    const newKey = memoryItem.querySelector('.edit-key-input').value.trim();
-                    const newValue = memoryItem.querySelector('.edit-value-input').value.trim();
-                    if (newKey && newValue) {
-                        editMemoryItem(key, newKey, newValue);
+                    const response = await fetch(`/memory?session_id=${getSessionId()}`);
+                    if (!response.ok) throw new Error('Failed to load memory');
+                    
+                    const memories = await response.json();
+                    memoryItemsContainer.innerHTML = '';
+                    
+                    for (const [key, value] of Object.entries(memories)) {
+                        createMemoryItemElement(key, value);
                     }
+                } catch (error) {
+                    console.error('Error loading memories:', error);
                 }
             }
             
-            async function editMemoryItem(oldKey, newKey, newValue) {
-                try {
-                    await fetch('/memory/edit', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ old_key: oldKey, new_key: newKey, new_value: newValue }),
-                    });
-                    loadMemoryItems();
-                } catch (error) {
-                    console.error('Error editing memory:', error);
-                }
+            function createMemoryItemElement(key, value) {
+                const item = document.createElement('div');
+                item.className = 'memory-item';
+                item.dataset.key = key;
+
+                item.innerHTML = `
+                    <div class="memory-item-header">
+                        <span class="memory-key">${key}</span>
+                        <div class="memory-actions">
+                            <button class="memory-edit" title="Edit">✏️</button>
+                            <button class="memory-delete" title="Delete">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="memory-value">${value}</div>
+                    <div class="edit-form">
+                        <input type="text" class="edit-input" value="${value}">
+                        <div class="edit-buttons">
+                            <button class="edit-save">Save</button>
+                            <button class="edit-cancel">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                
+                memoryItemsContainer.appendChild(item);
+
+                // Add event listeners for new item
+                item.querySelector('.memory-delete').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showConfirmation(key);
+                });
+
+                item.querySelector('.memory-edit').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    item.querySelector('.edit-form').classList.add('active');
+                    item.querySelector('.memory-value').style.display = 'none';
+                });
+
+                item.querySelector('.edit-cancel').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    item.querySelector('.edit-form').classList.remove('active');
+                    item.querySelector('.memory-value').style.display = 'block';
+                });
+
+                item.querySelector('.edit-save').addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const newValue = item.querySelector('.edit-input').value.trim();
+                    if (newValue) {
+                        await saveMemoryItem(key, newValue, item);
+                    }
+                });
             }
 
-            memoryItemsContainer.addEventListener('click', handleMemoryItemInteraction);
-            confirmDeleteBtn.addEventListener('click', deleteMemoryItem);
-            cancelDeleteBtn.addEventListener('click', hideDeleteConfirmation);
+            async function saveMemoryItem(key, value, itemElement = null) {
+                let currentKey = key;
+                let currentValue = value;
+
+                if (typeof key !== 'string') { // Handle "Add New" case
+                    currentKey = memoryKeyInput.value.trim();
+                    currentValue = memoryValueInput.value.trim();
+                }
+
+                if (!currentKey || !currentValue) {
+                    alert('Both key and value are required.');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/memory', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            session_id: getSessionId(), 
+                            key: currentKey,
+                            value: currentValue
+                        })
+                    });
+
+                    if (!response.ok) throw new Error('Failed to save memory');
+
+                    if (itemElement) { // Editing existing item
+                        itemElement.querySelector('.memory-value').textContent = currentValue;
+                        itemElement.querySelector('.memory-value').style.display = 'block';
+                        itemElement.querySelector('.edit-form').classList.remove('active');
+                    } else { // Adding new item
+                        // Re-fetch or just add the element? Let's just add it.
+                        const existingItem = memoryItemsContainer.querySelector(`.memory-item[data-key="${currentKey}"]`);
+                        if(existingItem) {
+                            existingItem.querySelector('.memory-value').textContent = currentValue;
+                        } else {
+                            createMemoryItemElement(currentKey, currentValue);
+                        }
+                        memoryKeyInput.value = '';
+                        memoryValueInput.value = '';
+                    }
+                } catch (error) {
+                    console.error('Error saving memory:', error);
+                    alert(`Error: ${error.message}`);
+                }
+            }
+            
+            async function deleteMemoryItem(key) {
+                try {
+                    const response = await fetch('/memory', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            session_id: getSessionId(), 
+                            key: key 
+                        })
+                    });
+                    if (!response.ok) throw new Error('Failed to delete memory');
+                    
+                    document.querySelector(`.memory-item[data-key="${key}"]`).remove();
+                } catch (error) {
+                    console.error('Error deleting memory:', error);
+                    alert(`Error: ${error.message}`);
+                }
+            }
         });
     </script>
 </body>
