@@ -20,7 +20,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize the model
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-2.5-flash-latest')
 
 # --- Constants ---
 PERSONALITY_PROMPTS = {
