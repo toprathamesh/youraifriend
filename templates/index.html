@@ -1286,8 +1286,8 @@
                     const memories = await response.json();
                     memoryItemsContainer.innerHTML = '';
                     
-                    for (const [key, value] of Object.entries(memories)) {
-                        createMemoryItemElement(key, value);
+                    for (const item of memories) {
+                        createMemoryItemElement(item.key, item.value);
                     }
                 } catch (error) {
                     console.error('Error loading memories:', error);
@@ -1378,7 +1378,6 @@
                         itemElement.querySelector('.memory-value').style.display = 'block';
                         itemElement.querySelector('.edit-form').classList.remove('active');
                     } else { // Adding new item
-                        // Re-fetch or just add the element? Let's just add it.
                         const existingItem = memoryItemsContainer.querySelector(`.memory-item[data-key="${currentKey}"]`);
                         if(existingItem) {
                             existingItem.querySelector('.memory-value').textContent = currentValue;
