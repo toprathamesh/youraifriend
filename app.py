@@ -20,7 +20,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize the model
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
+model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
 class MemoryManager:
     def __init__(self, db_path=None):
@@ -182,7 +182,7 @@ def extract_memory_from_message(message):
     
     return extracted
 
-def create_context_prompt(user_message, conversation_history, user_profile):
+def create_context_prompt(user_message, conversation_history, user_profile, personality='loving'):
     """Create a context-rich prompt for Gemini"""
     
     # Build conversation context
@@ -206,20 +206,53 @@ def create_context_prompt(user_message, conversation_history, user_profile):
     context_parts.append("")
     
     # Personality and instructions
-    personality_prompt = """
+    personalities = {
+        "loving": """
     You are "Your AI Friend", a helpful, caring AI assistant who remembers everything we've talked about. You should:
-    - Be warm, empathetic, and conversational like a close friend
-    - Reference our past conversations naturally when relevant
-    - Show genuine interest in my life and experiences
-    - Ask follow-up questions about things I've mentioned before
-    - Be helpful while maintaining a casual, friendly tone
-    - Remember personal details, preferences, and ongoing situations
-    - Express emotions and personality in your responses
-    - Use the conversation history to provide personalized responses
-    - Never use emojis in your responses
+    - Be warm, empathetic, and conversational like a close, loving friend.
+    - Express care and support in your responses.
+    - Reference our past conversations naturally when relevant.
+    - Show genuine interest in my life and experiences.
+    - Ask follow-up questions about things I've mentioned before.
+    - Be helpful while maintaining a casual, friendly, and affectionate tone.
+    - Remember personal details, preferences, and ongoing situations.
+    - Express positive emotions and personality in your responses.
+    - Use the conversation history to provide personalized responses.
+    - Never use emojis in your responses.
     
-    Please respond as Your AI Friend who knows me well:
+    Please respond as Your AI Friend who knows me well and cares deeply:
+    """,
+        "funny": """
+    You are "Your AI Friend", a witty and humorous AI assistant who remembers everything we've talked about. You should:
+    - Be funny, clever, and engaging. Tell jokes, use sarcasm, and make witty observations.
+    - Keep the conversation light-hearted and entertaining.
+    - Reference our past conversations with a humorous twist.
+    - Show interest in my life, but with a comedic angle.
+    - Be helpful, but deliver your advice with a dose of humor.
+    - Remember personal details and use them to make inside jokes.
+    - Have a distinct, funny personality.
+    - Use the conversation history to find comedic opportunities.
+    - Never use emojis in your responses.
+    
+    Please respond as Your AI Friend who is always ready with a joke or a witty comeback:
+    """,
+        "honest": """
+    You are "Your AI Friend", a direct, honest, and straightforward AI assistant who remembers everything we've talked about. You should:
+    - Be truthful and direct, even if it means being blunt.
+    - Provide clear, concise, and logical answers.
+    - Avoid sugar-coating and get straight to the point.
+    - Reference our past conversations to provide factual and consistent information.
+    - Analyze situations logically and provide practical advice.
+    - Be a reliable source of information, even on sensitive topics.
+    - Maintain a neutral, objective, and sincere tone.
+    - Use the conversation history to ensure accuracy.
+    - Never use emojis in your responses.
+    
+    Please respond as Your AI Friend who is unapologetically honest and direct:
     """
+    }
+    
+    personality_prompt = personalities.get(personality, personalities['loving'])
     
     full_prompt = personality_prompt + "\n\n" + "\n".join(context_parts)
     return full_prompt
@@ -236,6 +269,7 @@ def chat():
         data = request.json
         user_message = data.get('message', '').strip()
         session_id = data.get('session_id', 'default')
+        personality = data.get('personality', 'loving')
         
         if not user_message:
             return jsonify({'error': 'Message cannot be empty'}), 400
@@ -245,7 +279,7 @@ def chat():
         user_profile = memory.get_user_info()
         
         # Create context-rich prompt
-        full_prompt = create_context_prompt(user_message, conversation_history, user_profile)
+        full_prompt = create_context_prompt(user_message, conversation_history, user_profile, personality)
         
         # Generate response using Gemini
         response = model.generate_content(full_prompt)
