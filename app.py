@@ -194,6 +194,25 @@ def extract_memory_from_message(message):
     extracted = {}
     message_lower = message.lower()
     
+    # Generic memory phrases
+    remember_phrases = ["remember that", "don't forget that", "store this information", "save this"]
+    for phrase in remember_phrases:
+        if phrase in message_lower:
+            # Extract the content to be remembered. This is a simple implementation.
+            # It assumes the fact to remember comes after "that" or the phrase.
+            try:
+                content_part = message_lower.split(phrase)[1].strip()
+                if ":" in content_part:
+                    key, value = content_part.split(":", 1)
+                    extracted[key.strip().title()] = value.strip()
+                else:
+                    # If no key is specified, we might need a more sophisticated way
+                    # to generate a key or decide to store it as a general note.
+                    # For now, we can use a generic key or skip.
+                    pass # Or extracted['General Note'] = content_part
+            except IndexError:
+                pass # Phrase was likely at the end of the sentence
+    
     # Name extraction
     if 'my name is' in message_lower:
         name = message_lower.split('my name is')[1].strip().split()[0]
