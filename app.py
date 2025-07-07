@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 import re
 import pdfplumber
+import fitz  # PyMuPDF
 
 # Load environment variables
 load_dotenv()
@@ -390,10 +391,14 @@ def analyze_document():
         try:
             document_text = ""
             if file.filename.lower().endswith('.pdf'):
-                with pdfplumber.open(file) as pdf:
-                    document_text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+                # Use PyMuPDF (fitz) to read the PDF from the in-memory file stream
+                pdf_document = fitz.open(stream=file.read(), filetype="pdf")
+                for page in pdf_document:
+                    document_text += page.get_text()
+                pdf_document.close()
             else:
                 # Handle plain text files
+                file.seek(0) # Reset stream position
                 document_text = file.read().decode('utf-8', errors='replace')
             
             if not document_text.strip():
