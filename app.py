@@ -5,7 +5,6 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import google.generativeai as genai
-from google.generativeai import types
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -321,9 +320,9 @@ def chat():
             # Generate both text and image
             response = model.generate_content(
                 [prompt, user_message],
-                generation_config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"]
-                )
+                generation_config={
+                    "response_modalities": ["TEXT", "IMAGE"]
+                }
             )
             assistant_response = response.candidates[0].content.parts[0].text
             image_data = response.candidates[0].content.parts[1].image.data
