@@ -281,58 +281,41 @@
             }
         }
 
-        .input-container {
-            border-top: 1px solid #e5e5e5;
+        .chat-input-area {
+            padding: 24px;
             background: #ffffff;
-            padding: 20px 24px;
-            position: sticky;
-            bottom: 0;
-            backdrop-filter: blur(10px);
-            background-color: rgba(255, 255, 255, 0.95);
-        }
-
-        .input-wrapper {
-            max-width: 800px;
-            margin: 0 auto;
-            position: relative;
+            border-top: 1px solid #e5e5e5;
         }
 
         .input-form {
             display: flex;
+            align-items: center;
             gap: 12px;
-            align-items: flex-end;
+            max-width: 100%;
+            margin: 0 auto;
             background: #ffffff;
-            border: 2px solid #e5e5e5;
             border-radius: 12px;
-            padding: 4px;
-            transition: all 0.2s ease;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            border: 1px solid #e0e0e0;
+            padding: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
 
-        .input-form:focus-within {
-            border-color: #1f1f1f;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-        }
-
-        .message-input {
+        #message-input {
             flex: 1;
             border: none;
-            outline: none;
-            padding: 12px 16px;
+            background: transparent;
+            padding: 12px;
             font-size: 16px;
             font-family: inherit;
             resize: none;
+            line-height: 1.5;
             min-height: 24px;
             max-height: 200px;
-            line-height: 1.5;
-            background: transparent;
+            outline: none;
+            color: #1f1f1f;
         }
 
-        .message-input::placeholder {
-            color: #999;
-        }
-
-        .send-button {
+        #send-button {
             background: #1f1f1f;
             color: #ffffff;
             border: none;
@@ -348,13 +331,13 @@
             flex-shrink: 0;
         }
 
-        .send-button:hover:not(:disabled) {
+        #send-button:hover:not(:disabled) {
             background: #333;
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
 
-        .send-button:disabled {
+        #send-button:disabled {
             background: #cccccc;
             cursor: not-allowed;
             transform: none;
@@ -1101,6 +1084,13 @@
 
             // Initialization
             loadHistory();
+
+            function autoResizeTextarea() {
+                messageInput.style.height = 'auto';
+                messageInput.style.height = (messageInput.scrollHeight) + 'px';
+            }
+
+            messageInput.addEventListener('input', autoResizeTextarea);
         });
     </script>
 </body>

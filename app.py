@@ -321,7 +321,7 @@ def chat():
             # Generate both text and image
             response = model.generate_content(
                 [prompt, user_message],
-                generation_config=types.GenerationConfig(
+                generation_config=types.GenerateContentConfig(
                     response_modalities=["TEXT", "IMAGE"]
                 )
             )
