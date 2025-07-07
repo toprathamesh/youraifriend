@@ -62,6 +62,28 @@
             gap: 24px;
         }
 
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .new-chat-btn {
+            background: #1f1f1f;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .new-chat-btn:hover {
+            background: #333;
+        }
+
         .app-title {
             font-size: 20px;
             font-weight: 600;
@@ -929,6 +951,64 @@
         #confirm-cancel {
             background: #eee;
         }
+
+        .past-conversations-panel {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 300px;
+            height: 100vh;
+            background: #f9f9f9;
+            border-right: 1px solid #e5e5e5;
+            transform: translateX(-100%);
+            transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .past-conversations-panel.open {
+            transform: translateX(0);
+        }
+
+        .pc-header {
+            padding: 24px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .pc-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f1f1f;
+        }
+
+        .pc-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .conversation-item {
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #333;
+            transition: background-color 0.2s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .conversation-item:hover {
+            background-color: #e9e9e9;
+        }
+
+        .conversation-item.active {
+            background-color: #1f1f1f;
+            color: #ffffff;
+        }
     </style>
 </head>
 <body>
@@ -937,7 +1017,11 @@
             <header class="header">
                 <div class="header-content">
                     <div class="header-left">
+                        <button class="past-conversations-toggle" id="pc-toggle">☰</button>
                         <div class="app-title">Your AI Friend</div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="new-chat-btn" id="new-chat">New Conversation</button>
                         <div class="personality-selector">
                             <select id="personality">
                                 <option value="default">Default</option>
@@ -946,10 +1030,10 @@
                                 <option value="honest">Honest</option>
                             </select>
                         </div>
+                        <button class="memory-toggle" id="memory-toggle">
+                            <span>Memory</span>
+                        </button>
                     </div>
-                    <button class="memory-toggle" id="memory-toggle">
-                        <span>Memory</span>
-                    </button>
                 </div>
             </header>
 
@@ -984,6 +1068,15 @@
                             Send
                         </button>
                 </div>
+            </div>
+        </div>
+
+        <div class="past-conversations-panel" id="pcPanel">
+            <div class="pc-header">
+                <h2 class="pc-title">Past Conversations</h2>
+            </div>
+            <div class="pc-content" id="pc-list">
+                <!-- Past conversations will be listed here -->
             </div>
         </div>
 
@@ -1051,6 +1144,11 @@
             const memorySaveBtn = document.getElementById('memorySave');
             const memoryItemsContainer = document.getElementById('memoryItems');
 
+            const pcToggle = document.getElementById('pc-toggle');
+            const pcPanel = document.getElementById('pcPanel');
+            const pcList = document.getElementById('pc-list');
+            const newChatBtn = document.getElementById('new-chat');
+
             const confirmationOverlay = document.getElementById('confirmationOverlay');
             const confirmDeleteBtn = document.getElementById('confirmDelete');
             const cancelDeleteBtn = document.getElementById('confirmCancel');
@@ -1077,6 +1175,19 @@
             }
 
             // --- EVENT LISTENERS ---
+            if (pcToggle) {
+                pcToggle.addEventListener('click', () => {
+                    pcPanel.classList.toggle('open');
+                    if (pcPanel.classList.contains('open')) {
+                        loadPastConversations();
+                    }
+                });
+            }
+
+            if (newChatBtn) {
+                newChatBtn.addEventListener('click', startNewConversation);
+            }
+
             if (memoryToggle) {
                 memoryToggle.addEventListener('click', () => {
                     memoryPanel.classList.toggle('open');
@@ -1296,8 +1407,51 @@
                 }
             }
             
-            // Initial load
-            loadHistory();
+            async function loadPastConversations() {
+                try {
+                    const response = await fetch('/conversations');
+                    if (!response.ok) throw new Error('Failed to load conversations.');
+                    const data = await response.json();
+                    
+                    pcList.innerHTML = '';
+                    if (data.conversations && data.conversations.length > 0) {
+                        data.conversations.forEach(convo => {
+                            const item = document.createElement('div');
+                            item.className = 'conversation-item';
+                            item.textContent = convo.title;
+                            item.dataset.sessionId = convo.session_id;
+
+                            if (convo.session_id === getSessionId()) {
+                                item.classList.add('active');
+                            }
+                            
+                            item.addEventListener('click', () => {
+                                localStorage.setItem('chat_session_id', convo.session_id);
+                                messagesList.innerHTML = '';
+                                loadHistory();
+                                pcPanel.classList.remove('open');
+                                // Highlight active conversation
+                                document.querySelectorAll('.conversation-item').forEach(el => el.classList.remove('active'));
+                                item.classList.add('active');
+                            });
+                            pcList.appendChild(item);
+                        });
+                    } else {
+                        pcList.innerHTML = '<p style="padding: 16px; color: #666;">No past conversations found.</p>';
+                    }
+                } catch(error) {
+                    console.error('Error loading past conversations:', error);
+                    pcList.innerHTML = `<p class="error-message">${error.message}</p>`;
+                }
+            }
+
+            function startNewConversation() {
+                localStorage.removeItem('chat_session_id');
+                messagesList.innerHTML = '';
+                const newSessionId = getSessionId();
+                loadHistory(newSessionId);
+                pcPanel.classList.remove('open');
+            }
 
             // --- MEMORY PANEL LOGIC ---
             function loadMemoryItems() {
@@ -1425,6 +1579,7 @@
 
             // --- INITIALIZATION ---
             loadHistory();
+            loadPastConversations();
         });
     </script>
 </body>

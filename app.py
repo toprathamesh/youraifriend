@@ -142,6 +142,22 @@ class MemoryManager:
         self.close_db_connection(conn)
         
         return list(reversed(conversations))
+    
+    def get_all_conversations(self):
+        """Get all unique conversation sessions"""
+        conn, cursor = self.get_db_connection()
+        
+        cursor.execute('''
+            SELECT session_id, user_message, MIN(timestamp) as first_timestamp
+            FROM conversations
+            GROUP BY session_id
+            ORDER BY first_timestamp DESC
+        ''')
+        
+        conversations = cursor.fetchall()
+        self.close_db_connection(conn)
+        
+        return [{'session_id': row['session_id'], 'title': row['user_message']} for row in conversations]
 
 # Initialize memory manager
 memory = MemoryManager()
@@ -397,6 +413,15 @@ def get_history():
             ]
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/conversations', methods=['GET'])
+def get_conversations():
+    """Get all conversation sessions"""
+    try:
+        conversations = memory.get_all_conversations()
+        return jsonify({'conversations': conversations})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
