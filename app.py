@@ -7,7 +7,7 @@ from flask_cors import CORS
 import google.generativeai as genai
 from google.generativeai import types
 from dotenv import load_dotenv
-import pdfplumber
+from PyPDF2 import PdfReader
 
 # Load environment variables
 load_dotenv()
@@ -395,9 +395,9 @@ def analyze_document():
         try:
             document_text = ""
             if file.filename.lower().endswith('.pdf'):
-                with pdfplumber.open(file) as pdf:
-                    for page in pdf.pages:
-                        document_text += page.extract_text() or ""
+                reader = PdfReader(file)
+                for page in reader.pages:
+                    document_text += page.extract_text() or ""
             else:
                 # Handle plain text files
                 document_text = file.read().decode('utf-8', errors='replace')
