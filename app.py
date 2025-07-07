@@ -113,15 +113,6 @@ class MemoryManager:
             )
         ''')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_profile (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT UNIQUE NOT NULL,
-                value TEXT NOT NULL,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
         self.close_db_connection(conn)
     
     def save_conversation(self, user_message, assistant_response, session_id='default'):
@@ -151,40 +142,6 @@ class MemoryManager:
         self.close_db_connection(conn)
         
         return list(reversed(conversations))
-    
-    def update_user_info(self, key, value):
-        """Update user profile information"""
-        conn, cursor = self.get_db_connection()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO user_profile (key, value, last_updated)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-        ''', (key, value))
-        
-        self.close_db_connection(conn)
-    
-    def get_user_info(self, key=None):
-        """Get user profile information"""
-        conn, cursor = self.get_db_connection()
-        
-        if key:
-            cursor.execute('SELECT value FROM user_profile WHERE key = ?', (key,))
-            result = cursor.fetchone()
-            self.close_db_connection(conn)
-            return result['value'] if result else None
-        else:
-            cursor.execute('SELECT key, value FROM user_profile')
-            results = cursor.fetchall()
-            self.close_db_connection(conn)
-            return {row['key']: row['value'] for row in results}
-    
-    def delete_user_info(self, key):
-        """Delete user profile information"""
-        conn, cursor = self.get_db_connection()
-        
-        cursor.execute('DELETE FROM user_profile WHERE key = ?', (key,))
-        
-        self.close_db_connection(conn)
 
 # Initialize memory manager
 memory = MemoryManager()
@@ -370,6 +327,7 @@ def chat():
     user_message = data.get('message')
     session_id = data.get('session_id', 'default')
     personality = data.get('personality', 'default')
+    user_profile = data.get('user_profile', {})
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
@@ -378,13 +336,9 @@ def chat():
 
     # Extract memories from the new message
     extracted_info = extract_memory_from_message(user_message, model)
-    if extracted_info:
-        for key, value in extracted_info.items():
-            memory.update_user_info(key, value)
 
     # Get context
     conversation_history = memory.get_conversation_history(session_id)
-    user_profile = memory.get_user_info()
 
     # Create a rich prompt
     prompt = create_context_prompt(user_message, conversation_history, user_profile, personality)
@@ -418,7 +372,7 @@ def chat():
         # Save conversation
         memory.save_conversation(user_message, assistant_response, session_id)
 
-        return jsonify({"response": assistant_response})
+        return jsonify({"response": assistant_response, "new_memories": extracted_info})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -499,84 +453,6 @@ def analyze_document():
             return jsonify({'error': str(e)}), 500
     
     return jsonify({'error': 'File processing failed'}), 500
-
-@app.route('/memory', methods=['GET', 'POST', 'DELETE'])
-def manage_memory():
-    """Manage memory items"""
-    try:
-        if request.method == 'GET':
-            # Get all memory items
-            profile = memory.get_user_info()
-            return jsonify({'memory_items': profile})
-        
-        elif request.method == 'POST':
-            # Add new memory item
-            data = request.json
-            key = data.get('key')
-            value = data.get('value')
-            
-            if key and value:
-                memory.update_user_info(key, value)
-                return jsonify({'success': True, 'message': 'Memory item added'})
-            else:
-                return jsonify({'error': 'Key and value are required'}), 400
-        
-        elif request.method == 'DELETE':
-            # Delete memory item
-            data = request.json
-            key = data.get('key')
-            
-            if key:
-                memory.delete_user_info(key)
-                return jsonify({'success': True, 'message': 'Memory item deleted'})
-            else:
-                return jsonify({'error': 'Key is required'}), 400
-                
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/memory/edit', methods=['PUT'])
-def edit_memory():
-    """Edit existing memory item"""
-    try:
-        data = request.json
-        old_key = data.get('old_key')
-        new_key = data.get('new_key') 
-        new_value = data.get('new_value')
-        
-        if old_key and new_key and new_value:
-            # Delete old entry
-            memory.delete_user_info(old_key)
-            # Add new entry
-            memory.update_user_info(new_key, new_value)
-            return jsonify({'success': True, 'message': 'Memory item updated'})
-        else:
-            return jsonify({'error': 'All fields are required'}), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/profile', methods=['GET', 'POST'])
-def user_profile():
-    """Manage user profile information"""
-    try:
-        if request.method == 'GET':
-            profile = memory.get_user_info()
-            return jsonify({'profile': profile})
-        
-        elif request.method == 'POST':
-            data = request.json
-            key = data.get('key')
-            value = data.get('value')
-            
-            if key and value:
-                memory.update_user_info(key, value)
-                return jsonify({'success': True, 'message': 'Profile updated'})
-            else:
-                return jsonify({'error': 'Key and value are required'}), 400
-                
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 # For Vercel serverless deployment
 if os.environ.get('VERCEL'):

@@ -1058,6 +1058,24 @@
             let keyToDelete = null;
             let currentMode = 'chat';
 
+            // --- MEMORY HELPERS ---
+            function getMemories() {
+                const memoriesJSON = localStorage.getItem('user_memories');
+                return memoriesJSON ? JSON.parse(memoriesJSON) : {};
+            }
+
+            function saveMemory(key, value) {
+                const memories = getMemories();
+                memories[key] = value;
+                localStorage.setItem('user_memories', JSON.stringify(memories));
+            }
+
+            function deleteMemory(key) {
+                const memories = getMemories();
+                delete memories[key];
+                localStorage.setItem('user_memories', JSON.stringify(memories));
+            }
+
             // --- EVENT LISTENERS ---
             if (memoryToggle) {
                 memoryToggle.addEventListener('click', () => {
@@ -1069,7 +1087,18 @@
             }
 
             if (memorySaveBtn) {
-                memorySaveBtn.addEventListener('click', () => saveMemoryItem());
+                memorySaveBtn.addEventListener('click', () => {
+                    const key = memoryKeyInput.value.trim();
+                    const value = memoryValueInput.value.trim();
+                    if (key && value) {
+                        saveMemory(key, value);
+                        memoryKeyInput.value = '';
+                        memoryValueInput.value = '';
+                        loadMemoryItems();
+                    } else {
+                        alert('Both topic and detail must be provided.');
+                    }
+                });
             }
 
             modeSelector.addEventListener('click', (e) => {
@@ -1184,7 +1213,8 @@
                         body: JSON.stringify({
                             message: userMessage,
                             session_id: getSessionId(),
-                            personality: personalitySelector.value
+                            personality: personalitySelector.value,
+                            user_profile: getMemories() // Send memories to backend
                         })
                     });
 
@@ -1195,6 +1225,17 @@
                     
                     const data = await response.json();
                     displayMessage('assistant', data.response, data.image_data);
+
+                    // Check for and save new memories
+                    if (data.new_memories && Object.keys(data.new_memories).length > 0) {
+                        for (const [key, value] of Object.entries(data.new_memories)) {
+                            saveMemory(key, value);
+                        }
+                        // Optionally, reload memory panel if it's open
+                        if (memoryPanel.classList.contains('open')) {
+                            loadMemoryItems();
+                        }
+                    }
 
                 } catch (error) {
                     displayMessage('assistant', `Sorry, there was an error: ${error.message}`);
@@ -1258,34 +1299,10 @@
             // Initial load
             loadHistory();
 
-            // --- MEMORY LOGIC ---
-            function showConfirmation(key) {
-                keyToDelete = key;
-                confirmationOverlay.style.display = 'flex';
-            }
-
-            function hideConfirmation() {
-                keyToDelete = null;
-                confirmationOverlay.style.display = 'none';
-            }
-
-            confirmDeleteBtn.addEventListener('click', async () => {
-                if (keyToDelete) {
-                    await deleteMemoryItem(keyToDelete);
-                    hideConfirmation();
-                }
-            });
-
-            cancelDeleteBtn.addEventListener('click', hideConfirmation);
-
-            async function loadMemoryItems() {
+            // --- MEMORY PANEL LOGIC ---
+            function loadMemoryItems() {
                 try {
-                    const response = await fetch('/memory');
-                    if (!response.ok) {
-                        throw new Error('Could not fetch memories.');
-                    }
-                    const data = await response.json();
-                    const memories = data.memory_items; // Correctly access the nested object
+                    const memories = getMemories();
                     memoryItemsContainer.innerHTML = ''; // Clear current items
 
                     if (Object.keys(memories).length === 0) {
@@ -1302,111 +1319,112 @@
                     memoryItemsContainer.innerHTML = `<p class="error-message">${error.message}</p>`;
                 }
             }
-            
+
             function createMemoryItemElement(key, value) {
                 const item = document.createElement('div');
                 item.className = 'memory-item';
                 item.dataset.key = key;
 
-                item.innerHTML = `
-                    <div class="memory-item-header">
-                        <span class="memory-key">${key}</span>
-                        <div class="memory-actions">
-                            <button class="memory-edit" title="Edit">✏️</button>
-                            <button class="memory-delete" title="Delete">🗑️</button>
-                        </div>
-                    </div>
-                    <div class="memory-value">${value}</div>
-                    <div class="edit-form">
-                        <input type="text" class="edit-input" value="${value}">
-                        <div class="edit-buttons">
-                            <button class="edit-save">Save</button>
-                            <button class="edit-cancel">Cancel</button>
-                        </div>
-                    </div>
-                `;
+                const header = document.createElement('div');
+                header.className = 'memory-item-header';
+
+                const keyEl = document.createElement('div');
+                keyEl.className = 'memory-key';
+                keyEl.textContent = key;
+
+                const actions = document.createElement('div');
+                actions.className = 'memory-actions';
+
+                const editBtn = document.createElement('button');
+                editBtn.className = 'memory-edit';
+                editBtn.innerHTML = '&#9998;'; // Edit icon
+                editBtn.title = 'Edit';
+                editBtn.addEventListener('click', () => {
+                    editForm.classList.toggle('active');
+                });
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'memory-delete';
+                deleteBtn.innerHTML = '&#128465;'; // Trash icon
+                deleteBtn.title = 'Delete';
+                deleteBtn.addEventListener('click', () => {
+                    keyToDelete = key;
+                    confirmationOverlay.style.display = 'flex';
+                });
                 
-                memoryItemsContainer.appendChild(item);
+                actions.appendChild(editBtn);
+                actions.appendChild(deleteBtn);
+                header.appendChild(keyEl);
+                header.appendChild(actions);
 
-                // Add event listeners for new item
-                item.querySelector('.memory-delete').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    showConfirmation(key);
-                });
+                const valueEl = document.createElement('div');
+                valueEl.className = 'memory-value';
+                valueEl.textContent = value;
+                
+                const editForm = document.createElement('div');
+                editForm.className = 'edit-form';
+                
+                const editKeyInput = document.createElement('input');
+                editKeyInput.className = 'edit-input';
+                editKeyInput.value = key;
+                
+                const editValueInput = document.createElement('input');
+                editValueInput.className = 'edit-input';
+                editValueInput.value = value;
+                
+                const editButtons = document.createElement('div');
+                editButtons.className = 'edit-buttons';
 
-                item.querySelector('.memory-edit').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    item.querySelector('.edit-form').classList.add('active');
-                    item.querySelector('.memory-value').style.display = 'none';
-                });
-
-                item.querySelector('.edit-cancel').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    item.querySelector('.edit-form').classList.remove('active');
-                    item.querySelector('.memory-value').style.display = 'block';
-                });
-
-                item.querySelector('.edit-save').addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    const newValue = item.querySelector('.edit-input').value.trim();
-                    if (newValue) {
-                        await saveMemoryItem(key, newValue, item);
+                const saveEditBtn = document.createElement('button');
+                saveEditBtn.className = 'edit-save';
+                saveEditBtn.textContent = 'Save';
+                saveEditBtn.addEventListener('click', () => {
+                    const newKey = editKeyInput.value.trim();
+                    const newValue = editValueInput.value.trim();
+                    if (newKey && newValue) {
+                        deleteMemory(key); // Delete old key
+                        saveMemory(newKey, newValue); // Save new
+                        loadMemoryItems();
                     }
                 });
+
+                const cancelEditBtn = document.createElement('button');
+                cancelEditBtn.className = 'edit-cancel';
+                cancelEditBtn.textContent = 'Cancel';
+                cancelEditBtn.addEventListener('click', () => {
+                    editForm.classList.remove('active');
+                });
+
+                editButtons.appendChild(saveEditBtn);
+                editButtons.appendChild(cancelEditBtn);
+
+                editForm.appendChild(editKeyInput);
+                editForm.appendChild(editValueInput);
+                editForm.appendChild(editButtons);
+
+                item.appendChild(header);
+                item.appendChild(valueEl);
+                item.appendChild(editForm);
+
+                return item;
             }
 
-            async function saveMemoryItem() {
-                const key = memoryKeyInput.value.trim();
-                const value = memoryValueInput.value.trim();
-
-                if (!key || !value) {
-                    alert('Both topic and detail must be provided.');
-                    return;
+            confirmDeleteBtn.addEventListener('click', () => {
+                if (keyToDelete) {
+                    deleteMemory(keyToDelete);
+                    loadMemoryItems();
                 }
+                confirmationOverlay.style.display = 'none';
+                keyToDelete = null;
+            });
 
-                try {
-                    const response = await fetch('/memory', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key, value })
-                    });
+            cancelDeleteBtn.addEventListener('click', () => {
+                confirmationOverlay.style.display = 'none';
+                keyToDelete = null;
+            });
 
-                    if (!response.ok) {
-                        throw new Error('Failed to save memory.');
-                    }
-                    
-                    const data = await response.json();
-                    if (data.success) {
-                        memoryKeyInput.value = '';
-                        memoryValueInput.value = '';
-                        loadMemoryItems(); // Refresh the list
-                    } else {
-                        throw new Error(data.error || 'An unknown error occurred.');
-                    }
-                } catch (error) {
-                    console.error('Error saving memory:', error);
-                    alert(`Error: ${error.message}`);
-                }
-            }
-            
-            async function deleteMemoryItem(key) {
-                try {
-                    const response = await fetch('/memory', {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            session_id: getSessionId(), 
-                            key: key 
-                        })
-                    });
-                    if (!response.ok) throw new Error('Failed to delete memory');
-                    
-                    document.querySelector(`.memory-item[data-key="${key}"]`).remove();
-                } catch (error) {
-                    console.error('Error deleting memory:', error);
-                    alert(`Error: ${error.message}`);
-                }
-            }
+            // --- INITIALIZATION ---
+            loadHistory();
         });
     </script>
 </body>
