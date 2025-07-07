@@ -918,6 +918,8 @@
             const fileUploadLabel = document.getElementById('file-upload-label');
             const docFileInput = document.getElementById('document-file-input');
             const fileNameDisplay = document.getElementById('file-name-display');
+            const memoryToggle = document.getElementById('memory-toggle');
+            const memoryPanel = document.getElementById('memory-panel');
 
             function getSessionId() {
                 let sessionId = localStorage.getItem('chat_session_id');
@@ -1121,6 +1123,13 @@
                     fileNameDisplay.textContent = '';
                 }
             });
+
+            if (memoryToggle) {
+                memoryToggle.addEventListener('click', () => {
+                    memoryPanel.classList.toggle('open');
+                    memoryToggle.classList.toggle('active');
+                });
+            }
         });
     </script>
 </body>

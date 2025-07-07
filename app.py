@@ -246,10 +246,10 @@ def create_context_prompt(user_message, conversation_history, user_profile, pers
     """Create a context-rich prompt for Gemini"""
     
     # Select personality prompt
-    personality_prompt = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['loving'])
+    personality_prompt = PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['default'])
     
     # Build conversation context
-    context_parts = []
+    context_parts = [personality_prompt]
 
     if is_image_request:
         context_parts.append("Image Generation Instructions:")
@@ -275,7 +275,7 @@ def create_context_prompt(user_message, conversation_history, user_profile, pers
     context_parts.append(f"You: {user_message}")
     context_parts.append("")
     
-    full_prompt = personality_prompt + "\n\n" + "\n".join(context_parts)
+    full_prompt = "\n".join(context_parts)
     return full_prompt
 
 @app.route('/')
@@ -329,15 +329,28 @@ def chat():
             assistant_response = response.candidates[0].content.parts[0].text
             image_data = response.candidates[0].content.parts[1].image.data
         else:
-            # Generate text only
-            chat_session = model.start_chat(
-                history=[
-                    {
-                        "role": "user",
-                        "parts": [prompt]
-                    }
-                ]
-            )
+            # Start a chat with history
+            chat_session = model.start_chat(history=[])
+            
+            # Construct a proper history list
+            history_for_model = []
+            if conversation_history:
+                for user_msg, assistant_msg, timestamp in conversation_history:
+                    history_for_model.append({"role": "user", "parts": [user_msg]})
+                    history_for_model.append({"role": "model", "parts": [assistant_msg]})
+            
+            # Prepend the system prompt and user profile info
+            system_prompt = [PERSONALITY_PROMPTS.get(personality, PERSONALITY_PROMPTS['default'])]
+            if user_profile:
+                profile_text = "Here is what you know about me: " + json.dumps(user_profile)
+                system_prompt.append(profile_text)
+
+            # Insert the system prompt at the beginning of the history
+            chat_session.history = [
+                {"role": "user", "parts": system_prompt},
+                {"role": "model", "parts": ["Understood."]} # Prime the model
+            ] + history_for_model
+
             response = chat_session.send_message(user_message)
             assistant_response = response.text
 
