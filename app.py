@@ -1,152 +1,379 @@
-from flask import Flask, request, jsonify
-from ai.qa import MedicalQABot
-from ai.symptom_checker import SymptomChecker
-from ai.drug_info import DrugInfoLookup
-from ai.reminder import ReminderManager
-from ai.order import OrderManager
-from ai.user import UserManager
-import json
 import os
-import random
+import sqlite3
+import json
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-app = Flask(__name__)
+# Load environment variables
+load_dotenv()
 
-# Initialize AI modules
-qa_bot = MedicalQABot()
-symptom_checker = SymptomChecker()
-drug_lookup = DrugInfoLookup()
-reminder_manager = ReminderManager()
-order_manager = OrderManager()
-user_manager = UserManager()
+app = Flask(__name__, static_folder='static')
+CORS(app)
 
-# Load sample Q&A data
-DATA_PATH = os.path.join('data', 'medquad.json')
-if os.path.exists(DATA_PATH):
-    with open(DATA_PATH, 'r') as f:
-        qa_data = json.load(f)
-else:
-    qa_data = []
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is required")
+genai.configure(api_key=GEMINI_API_KEY)
 
-HEALTH_TIPS = [
-    "Drink plenty of water every day.",
-    "Exercise regularly for at least 30 minutes.",
-    "Eat a balanced diet rich in fruits and vegetables.",
-    "Get enough sleep every night.",
-    "Wash your hands frequently to prevent illness."
-]
+# Initialize the model
+model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+class MemoryManager:
+    def __init__(self, db_path=None):
+        if db_path is None:
+            # For Vercel deployment, use /tmp directory
+            db_path = '/tmp/chat_memory.db' if os.environ.get('VERCEL') else 'chat_memory.db'
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize the SQLite database for storing conversations"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                user_message TEXT NOT NULL,
+                assistant_response TEXT NOT NULL,
+                session_id TEXT DEFAULT 'default'
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_profile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT UNIQUE NOT NULL,
+                value TEXT NOT NULL,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def save_conversation(self, user_message, assistant_response, session_id='default'):
+        """Save a conversation to the database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO conversations (user_message, assistant_response, session_id)
+            VALUES (?, ?, ?)
+        ''', (user_message, assistant_response, session_id))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_conversation_history(self, session_id='default', limit=50):
+        """Get recent conversation history"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_message, assistant_response, timestamp
+            FROM conversations
+            WHERE session_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (session_id, limit))
+        
+        conversations = cursor.fetchall()
+        conn.close()
+        
+        # Return in chronological order (oldest first)
+        return list(reversed(conversations))
+    
+    def update_user_info(self, key, value):
+        """Update user profile information"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO user_profile (key, value, last_updated)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        ''', (key, value))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_user_info(self, key=None):
+        """Get user profile information"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if key:
+            cursor.execute('SELECT value FROM user_profile WHERE key = ?', (key,))
+            result = cursor.fetchone()
+            conn.close()
+            return result[0] if result else None
+        else:
+            cursor.execute('SELECT key, value FROM user_profile')
+            results = cursor.fetchall()
+            conn.close()
+            return dict(results)
+    
+    def delete_user_info(self, key):
+        """Delete user profile information"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM user_profile WHERE key = ?', (key,))
+        
+        conn.commit()
+        conn.close()
+
+# Initialize memory manager
+memory = MemoryManager()
+
+def extract_memory_from_message(message):
+    """Extract personal information from user messages"""
+    extracted = {}
+    message_lower = message.lower()
+    
+    # Name extraction
+    if 'my name is' in message_lower:
+        name = message_lower.split('my name is')[1].strip().split()[0]
+        extracted['Name'] = name.title()
+    elif 'i am' in message_lower and any(word in message_lower for word in ['called', 'named']):
+        parts = message_lower.split('i am')[1].strip()
+        if 'called' in parts:
+            name = parts.split('called')[1].strip().split()[0]
+            extracted['Name'] = name.title()
+    
+    # Job/work extraction
+    if 'i work' in message_lower:
+        work = message_lower.split('i work')[1].strip()
+        if work.startswith('as'):
+            work = work[2:].strip()
+        elif work.startswith('at'):
+            work = work[2:].strip()
+        extracted['Work'] = work.title()
+    elif 'my job is' in message_lower:
+        job = message_lower.split('my job is')[1].strip()
+        extracted['Job'] = job.title()
+    
+    # Location extraction
+    if 'i live in' in message_lower:
+        location = message_lower.split('i live in')[1].strip().split()[0]
+        extracted['Location'] = location.title()
+    elif 'i am from' in message_lower:
+        location = message_lower.split('i am from')[1].strip().split()[0]
+        extracted['Location'] = location.title()
+    
+    # Preferences extraction
+    if 'i love' in message_lower:
+        love = message_lower.split('i love')[1].strip()
+        extracted['Loves'] = love
+    elif 'i like' in message_lower:
+        like = message_lower.split('i like')[1].strip()
+        extracted['Likes'] = like
+    
+    # Age extraction
+    if 'i am' in message_lower and 'years old' in message_lower:
+        age_part = message_lower.split('i am')[1].split('years old')[0].strip()
+        if age_part.isdigit():
+            extracted['Age'] = age_part
+    
+    return extracted
+
+def create_context_prompt(user_message, conversation_history, user_profile):
+    """Create a context-rich prompt for Gemini"""
+    
+    # Build conversation context
+    context_parts = []
+    
+    if user_profile:
+        context_parts.append("What I know about you:")
+        for key, value in user_profile.items():
+            context_parts.append(f"- {key}: {value}")
+        context_parts.append("")
+    
+    if conversation_history:
+        context_parts.append("Our previous conversations:")
+        for user_msg, assistant_msg, timestamp in conversation_history[-10:]:  # Last 10 exchanges
+            context_parts.append(f"You: {user_msg}")
+            context_parts.append(f"Me: {assistant_msg}")
+        context_parts.append("")
+    
+    context_parts.append("Current message:")
+    context_parts.append(f"You: {user_message}")
+    context_parts.append("")
+    
+    # Personality and instructions
+    personality_prompt = """
+    You are "Your AI Friend", a helpful, caring AI assistant who remembers everything we've talked about. You should:
+    - Be warm, empathetic, and conversational like a close friend
+    - Reference our past conversations naturally when relevant
+    - Show genuine interest in my life and experiences
+    - Ask follow-up questions about things I've mentioned before
+    - Be helpful while maintaining a casual, friendly tone
+    - Remember personal details, preferences, and ongoing situations
+    - Express emotions and personality in your responses
+    - Use the conversation history to provide personalized responses
+    - Never use emojis in your responses
+    
+    Please respond as Your AI Friend who knows me well:
+    """
+    
+    full_prompt = personality_prompt + "\n\n" + "\n".join(context_parts)
+    return full_prompt
 
 @app.route('/')
 def index():
-    return jsonify({"message": "Welcome to AIforHelp Healthcare Assistant API!"})
+    """Serve the chat interface"""
+    return render_template('index.html')
 
-@app.route('/qa', methods=['POST'])
-def medical_qa():
-    """Answer a medical question using context from the dataset."""
-    data = request.json
-    question = data.get('question')
-    context = qa_data[0]['context'] if qa_data else "Medical information."
-    if question and qa_data:
-        answer = qa_bot.answer(question, context)
-        return jsonify({'question': question, 'answer': answer, 'context': context})
-    return jsonify({'error': 'No question provided or dataset missing.'}), 400
+@app.route('/chat', methods=['POST'])
+def chat():
+    """Handle chat messages"""
+    try:
+        data = request.json
+        user_message = data.get('message', '').strip()
+        session_id = data.get('session_id', 'default')
+        
+        if not user_message:
+            return jsonify({'error': 'Message cannot be empty'}), 400
+        
+        # Get conversation history and user profile
+        conversation_history = memory.get_conversation_history(session_id)
+        user_profile = memory.get_user_info()
+        
+        # Create context-rich prompt
+        full_prompt = create_context_prompt(user_message, conversation_history, user_profile)
+        
+        # Generate response using Gemini
+        response = model.generate_content(full_prompt)
+        assistant_response = response.text
+        
+        # Save the conversation
+        memory.save_conversation(user_message, assistant_response, session_id)
+        
+        # Extract and save any new personal information mentioned
+        extracted_info = extract_memory_from_message(user_message)
+        for key, value in extracted_info.items():
+            memory.update_user_info(key, value)
+        
+        return jsonify({
+            'response': assistant_response,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
+        return jsonify({'error': 'Sorry, I encountered an error. Please try again.'}), 500
 
-@app.route('/symptom-checker', methods=['POST'])
-def check_symptoms():
-    """Check symptoms and return possible conditions (stub)."""
-    data = request.json
-    symptoms = data.get('symptoms', [])
-    result = symptom_checker.check(symptoms)
-    return jsonify(result)
+@app.route('/history', methods=['GET'])
+def get_history():
+    """Get conversation history"""
+    try:
+        session_id = request.args.get('session_id', 'default')
+        limit = int(request.args.get('limit', 50))
+        
+        history = memory.get_conversation_history(session_id, limit)
+        
+        return jsonify({
+            'history': [
+                {
+                    'user_message': msg[0],
+                    'assistant_response': msg[1],
+                    'timestamp': msg[2]
+                }
+                for msg in history
+            ]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/drug-info', methods=['GET'])
-def drug_info():
-    """Fetch drug information from OpenFDA."""
-    drug_name = request.args.get('name')
-    if not drug_name:
-        return jsonify({'error': 'No drug name provided.'}), 400
-    info = drug_lookup.search(drug_name)
-    return jsonify(info)
+@app.route('/memory', methods=['GET', 'POST', 'DELETE'])
+def manage_memory():
+    """Manage memory items"""
+    try:
+        if request.method == 'GET':
+            # Get all memory items
+            profile = memory.get_user_info()
+            return jsonify({'memory_items': profile})
+        
+        elif request.method == 'POST':
+            # Add new memory item
+            data = request.json
+            key = data.get('key')
+            value = data.get('value')
+            
+            if key and value:
+                memory.update_user_info(key, value)
+                return jsonify({'success': True, 'message': 'Memory item added'})
+            else:
+                return jsonify({'error': 'Key and value are required'}), 400
+        
+        elif request.method == 'DELETE':
+            # Delete memory item
+            data = request.json
+            key = data.get('key')
+            
+            if key:
+                memory.delete_user_info(key)
+                return jsonify({'success': True, 'message': 'Memory item deleted'})
+            else:
+                return jsonify({'error': 'Key is required'}), 400
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/set-reminder', methods=['POST'])
-def set_reminder():
-    """Set a medication reminder for a user."""
-    data = request.json
-    user = data.get('user')
-    medicine = data.get('medicine')
-    time = data.get('time')
-    if not all([user, medicine, time]):
-        return jsonify({'error': 'Missing user, medicine, or time.'}), 400
-    result = reminder_manager.set_reminder(user, medicine, time)
-    return jsonify(result)
+@app.route('/memory/edit', methods=['PUT'])
+def edit_memory():
+    """Edit existing memory item"""
+    try:
+        data = request.json
+        old_key = data.get('old_key')
+        new_key = data.get('new_key') 
+        new_value = data.get('new_value')
+        
+        if old_key and new_key and new_value:
+            # Delete old entry
+            memory.delete_user_info(old_key)
+            # Add new entry
+            memory.update_user_info(new_key, new_value)
+            return jsonify({'success': True, 'message': 'Memory item updated'})
+        else:
+            return jsonify({'error': 'All fields are required'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/get-reminders', methods=['GET'])
-def get_reminders():
-    """Get all reminders for a user."""
-    user = request.args.get('user')
-    if not user:
-        return jsonify({'error': 'Missing user.'}), 400
-    reminders = reminder_manager.get_reminders(user)
-    return jsonify({'reminders': reminders})
+@app.route('/profile', methods=['GET', 'POST'])
+def user_profile():
+    """Manage user profile information"""
+    try:
+        if request.method == 'GET':
+            profile = memory.get_user_info()
+            return jsonify({'profile': profile})
+        
+        elif request.method == 'POST':
+            data = request.json
+            key = data.get('key')
+            value = data.get('value')
+            
+            if key and value:
+                memory.update_user_info(key, value)
+                return jsonify({'success': True, 'message': 'Profile updated'})
+            else:
+                return jsonify({'error': 'Key and value are required'}), 400
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/order-medicine', methods=['POST'])
-def order_medicine():
-    """Place a new medicine order for a user."""
-    data = request.json
-    user = data.get('user')
-    medicine = data.get('medicine')
-    quantity = data.get('quantity')
-    if not all([user, medicine, quantity]):
-        return jsonify({'error': 'Missing user, medicine, or quantity.'}), 400
-    result = order_manager.place_order(user, medicine, quantity)
-    return jsonify(result)
-
-@app.route('/get-orders', methods=['GET'])
-def get_orders():
-    """Get all orders for a user."""
-    user = request.args.get('user')
-    if not user:
-        return jsonify({'error': 'Missing user.'}), 400
-    orders = order_manager.get_orders(user)
-    return jsonify({'orders': orders})
-
-@app.route('/repeat-order', methods=['POST'])
-def repeat_order():
-    """Repeat a previous order by order_id."""
-    data = request.json
-    user = data.get('user')
-    order_id = data.get('order_id')
-    if not all([user, order_id]):
-        return jsonify({'error': 'Missing user or order_id.'}), 400
-    result = order_manager.repeat_order(user, order_id)
-    return jsonify(result)
-
-@app.route('/user', methods=['POST'])
-def create_user():
-    """Create a new user profile."""
-    data = request.json
-    username = data.get('username')
-    info = data.get('info', {})
-    if not username:
-        return jsonify({'error': 'Missing username.'}), 400
-    result = user_manager.create_user(username, info)
-    return jsonify(result)
-
-@app.route('/user', methods=['GET'])
-def get_user():
-    """Get a user profile by username."""
-    username = request.args.get('username')
-    if not username:
-        return jsonify({'error': 'Missing username.'}), 400
-    user = user_manager.get_user(username)
-    if user:
-        return jsonify({'user': user})
-    return jsonify({'error': 'User not found.'}), 404
-
-@app.route('/health-tip', methods=['GET'])
-def health_tip():
-    """Get a random daily health tip."""
-    tip = random.choice(HEALTH_TIPS)
-    return jsonify({'health_tip': tip})
+# For Vercel serverless deployment
+if os.environ.get('VERCEL'):
+    # Export the app for Vercel
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=True, host='0.0.0.0', port=5000) 
