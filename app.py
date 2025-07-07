@@ -395,7 +395,7 @@ def analyze_document():
             # For simplicity, we'll read the file as text.
             # In a real-world scenario, you might need libraries like pdfplumber for PDFs
             # or python-docx for DOCX files.
-            document_text = file.read().decode('utf-8')
+            document_text = file.read().decode('utf-8', errors='replace')
             
             model = genai.GenerativeModel('gemini-2.5-flash')
             
