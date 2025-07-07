@@ -11,6 +11,7 @@ from pypdf import PdfReader
 import re
 import pdfplumber
 import fitz  # PyMuPDF
+import io
 
 # Load environment variables
 load_dotenv()
@@ -391,8 +392,9 @@ def analyze_document():
         try:
             document_text = ""
             if file.filename.lower().endswith('.pdf'):
-                # Use pypdf to read the PDF from the in-memory file stream
-                reader = PdfReader(file)
+                # Read the file stream into a BytesIO object for stability
+                stream = io.BytesIO(file.read())
+                reader = PdfReader(stream)
                 for page in reader.pages:
                     document_text += page.extract_text() or ""
             else:
