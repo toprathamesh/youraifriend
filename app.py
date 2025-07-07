@@ -7,6 +7,7 @@ from flask_cors import CORS
 import google.generativeai as genai
 from google.generativeai import types
 from dotenv import load_dotenv
+import pdfplumber
 
 # Load environment variables
 load_dotenv()
@@ -392,11 +393,18 @@ def analyze_document():
     
     if file:
         try:
-            # For simplicity, we'll read the file as text.
-            # In a real-world scenario, you might need libraries like pdfplumber for PDFs
-            # or python-docx for DOCX files.
-            document_text = file.read().decode('utf-8', errors='replace')
+            document_text = ""
+            if file.filename.lower().endswith('.pdf'):
+                with pdfplumber.open(file) as pdf:
+                    for page in pdf.pages:
+                        document_text += page.extract_text() or ""
+            else:
+                # Handle plain text files
+                document_text = file.read().decode('utf-8', errors='replace')
             
+            if not document_text.strip():
+                return jsonify({'error': 'Could not extract text from the document.'}), 400
+
             model = genai.GenerativeModel('gemini-2.5-flash')
             
             analysis_prompt = f"""
