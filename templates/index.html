@@ -793,6 +793,15 @@
         #document-file-input {
             display: none;
         }
+        #file-name-display {
+            font-size: 12px;
+            color: #666;
+            margin-left: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
     </style>
 </head>
 <body>
@@ -843,6 +852,7 @@
                 <div class="input-form">
                     <input type="file" id="document-file-input" accept=".txt,.pdf,.md">
                     <label for="document-file-input" id="file-upload-label" class="file-upload-btn" style="display: none;" title="Attach Document">📎</label>
+                    <span id="file-name-display"></span>
                     <textarea id="message-input" placeholder="Type your message..." rows="1"></textarea>
                     <button id="send-button" title="Send message">
                         Send
@@ -907,6 +917,7 @@
             const modeSelector = document.querySelector('.mode-selector');
             const fileUploadLabel = document.getElementById('file-upload-label');
             const docFileInput = document.getElementById('document-file-input');
+            const fileNameDisplay = document.getElementById('file-name-display');
 
             function getSessionId() {
                 let sessionId = localStorage.getItem('chat_session_id');
@@ -1015,6 +1026,7 @@
                 typingIndicator.classList.add('show');
                 messageInput.value = '';
                 docFileInput.value = ''; // Clear file input
+                fileNameDisplay.textContent = ''; // Clear file name display
 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -1055,9 +1067,13 @@
                     } else if (currentMode === 'image') {
                         fileUploadLabel.style.display = 'none';
                         messageInput.placeholder = 'Describe the image you want to generate...';
+                        docFileInput.value = '';
+                        fileNameDisplay.textContent = '';
                     } else {
                         fileUploadLabel.style.display = 'none';
                         messageInput.placeholder = 'Type your message...';
+                        docFileInput.value = '';
+                        fileNameDisplay.textContent = '';
                     }
                 }
             });
@@ -1097,6 +1113,14 @@
             }
 
             messageInput.addEventListener('input', autoResizeTextarea);
+
+            docFileInput.addEventListener('change', () => {
+                if (docFileInput.files.length > 0) {
+                    fileNameDisplay.textContent = docFileInput.files[0].name;
+                } else {
+                    fileNameDisplay.textContent = '';
+                }
+            });
         });
     </script>
 </body>
