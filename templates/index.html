@@ -1280,17 +1280,26 @@
 
             async function loadMemoryItems() {
                 try {
-                    const response = await fetch(`/memory?session_id=${getSessionId()}`);
-                    if (!response.ok) throw new Error('Failed to load memory');
-                    
-                    const memories = await response.json();
-                    memoryItemsContainer.innerHTML = '';
-                    
-                    for (const item of memories) {
-                        createMemoryItemElement(item.key, item.value);
+                    const response = await fetch('/memory');
+                    if (!response.ok) {
+                        throw new Error('Could not fetch memories.');
+                    }
+                    const data = await response.json();
+                    const memories = data.memory_items; // Correctly access the nested object
+                    memoryItemsContainer.innerHTML = ''; // Clear current items
+
+                    if (Object.keys(memories).length === 0) {
+                        memoryItemsContainer.innerHTML = '<p>No memories stored yet.</p>';
+                        return;
+                    }
+
+                    for (const [key, value] of Object.entries(memories)) {
+                        const item = createMemoryItemElement(key, value);
+                        memoryItemsContainer.appendChild(item);
                     }
                 } catch (error) {
                     console.error('Error loading memories:', error);
+                    memoryItemsContainer.innerHTML = `<p class="error-message">${error.message}</p>`;
                 }
             }
             
@@ -1346,46 +1355,33 @@
                 });
             }
 
-            async function saveMemoryItem(key, value, itemElement = null) {
-                let currentKey = key;
-                let currentValue = value;
+            async function saveMemoryItem() {
+                const key = memoryKeyInput.value.trim();
+                const value = memoryValueInput.value.trim();
 
-                if (typeof key !== 'string') { // Handle "Add New" case
-                    currentKey = memoryKeyInput.value.trim();
-                    currentValue = memoryValueInput.value.trim();
-                }
-
-                if (!currentKey || !currentValue) {
-                    alert('Both key and value are required.');
+                if (!key || !value) {
+                    alert('Both topic and detail must be provided.');
                     return;
                 }
-                
+
                 try {
                     const response = await fetch('/memory', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            session_id: getSessionId(), 
-                            key: currentKey,
-                            value: currentValue
-                        })
+                        body: JSON.stringify({ key, value })
                     });
 
-                    if (!response.ok) throw new Error('Failed to save memory');
-
-                    if (itemElement) { // Editing existing item
-                        itemElement.querySelector('.memory-value').textContent = currentValue;
-                        itemElement.querySelector('.memory-value').style.display = 'block';
-                        itemElement.querySelector('.edit-form').classList.remove('active');
-                    } else { // Adding new item
-                        const existingItem = memoryItemsContainer.querySelector(`.memory-item[data-key="${currentKey}"]`);
-                        if(existingItem) {
-                            existingItem.querySelector('.memory-value').textContent = currentValue;
-                        } else {
-                            createMemoryItemElement(currentKey, currentValue);
-                        }
+                    if (!response.ok) {
+                        throw new Error('Failed to save memory.');
+                    }
+                    
+                    const data = await response.json();
+                    if (data.success) {
                         memoryKeyInput.value = '';
                         memoryValueInput.value = '';
+                        loadMemoryItems(); // Refresh the list
+                    } else {
+                        throw new Error(data.error || 'An unknown error occurred.');
                     }
                 } catch (error) {
                     console.error('Error saving memory:', error);
