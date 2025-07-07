@@ -1319,9 +1319,8 @@
             
             if (memoryToggle) {
                 memoryToggle.addEventListener('click', () => {
-                    memoryPanel.classList.toggle('open');
-                    memoryToggle.classList.toggle('active');
-                    if (memoryPanel.classList.contains('open')) {
+                    memoryPanel.classList.toggle('visible');
+                    if (memoryPanel.classList.contains('visible')) {
                         loadMemoryItems();
                     }
                 });
