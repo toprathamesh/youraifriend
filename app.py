@@ -9,6 +9,7 @@ from google.generativeai import types
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 import re
+import pdfplumber
 
 # Load environment variables
 load_dotenv()
@@ -389,15 +390,14 @@ def analyze_document():
         try:
             document_text = ""
             if file.filename.lower().endswith('.pdf'):
-                reader = PdfReader(file)
-                for page in reader.pages:
-                    document_text += page.extract_text() or ""
+                with pdfplumber.open(file) as pdf:
+                    document_text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
             else:
                 # Handle plain text files
                 document_text = file.read().decode('utf-8', errors='replace')
             
             if not document_text.strip():
-                return jsonify({'error': 'Could not extract text from the document.'}), 400
+                return jsonify({'error': 'Could not extract text from the document. The document might be image-based or empty.'}), 400
 
             model = genai.GenerativeModel('gemini-2.5-flash')
             
