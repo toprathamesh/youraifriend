@@ -1033,19 +1033,13 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            let currentMode = 'chat';
-            
-            const chatContainer = document.querySelector('.chat-container');
-            const messageInput = document.getElementById('message-input');
-            const sendButton = document.getElementById('send-button');
-            const typingIndicator = document.querySelector('.typing-indicator');
-            const messagesList = document.querySelector('.messages-list');
-            const modeSelector = document.querySelector('.mode-selector');
-            const fileUploadLabel = document.getElementById('file-upload-label');
-            const docFileInput = document.getElementById('document-file-input');
-            const fileNameDisplay = document.getElementById('file-name-display');
+            const chatWindow = document.getElementById('chat-window');
+            const chatInput = document.getElementById('chat-input');
+            const modeButtons = document.querySelectorAll('.mode-btn');
+            const fileInput = document.getElementById('file-input');
             const memoryToggle = document.getElementById('memory-toggle');
             const memoryPanel = document.getElementById('memory-panel');
+            const memoryClose = document.getElementById('memory-close');
             const memoryKeyInput = document.getElementById('memory-key');
             const memoryValueInput = document.getElementById('memory-value');
             const memorySaveBtn = document.getElementById('memory-save');
@@ -1054,6 +1048,9 @@
             const confirmDeleteBtn = document.getElementById('confirm-delete');
             const cancelDeleteBtn = document.getElementById('confirm-cancel');
             let keyToDelete = null;
+            let currentMode = 'chat'; // 'chat', 'image', or 'document'
+            let currentPersonality = 'default';
+            let attachedFile = null;
 
             // --- EVENT LISTENERS ---
             if (memoryToggle) {
