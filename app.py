@@ -76,11 +76,21 @@ class MemoryManager:
             db_path = '/tmp/chat_memory.db' if os.environ.get('VERCEL') else 'chat_memory.db'
         self.db_path = db_path
         self.init_database()
-    
+
+    def get_db_connection(self):
+        """Creates and returns a database connection and cursor."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn, conn.cursor()
+
+    def close_db_connection(self, conn):
+        """Commits changes and closes the database connection."""
+        conn.commit()
+        conn.close()
+
     def init_database(self):
         """Initialize the SQLite database for storing conversations"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS conversations (
@@ -101,26 +111,22 @@ class MemoryManager:
             )
         ''')
         
-        conn.commit()
-        conn.close()
+        self.close_db_connection(conn)
     
     def save_conversation(self, user_message, assistant_response, session_id='default'):
         """Save a conversation to the database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         cursor.execute('''
             INSERT INTO conversations (user_message, assistant_response, session_id)
             VALUES (?, ?, ?)
         ''', (user_message, assistant_response, session_id))
         
-        conn.commit()
-        conn.close()
+        self.close_db_connection(conn)
     
     def get_conversation_history(self, session_id='default', limit=50):
         """Get recent conversation history"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         cursor.execute('''
             SELECT user_message, assistant_response, timestamp
@@ -131,49 +137,43 @@ class MemoryManager:
         ''', (session_id, limit))
         
         conversations = cursor.fetchall()
-        conn.close()
+        self.close_db_connection(conn)
         
-        # Return in chronological order (oldest first)
         return list(reversed(conversations))
     
     def update_user_info(self, key, value):
         """Update user profile information"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         cursor.execute('''
             INSERT OR REPLACE INTO user_profile (key, value, last_updated)
             VALUES (?, ?, CURRENT_TIMESTAMP)
         ''', (key, value))
         
-        conn.commit()
-        conn.close()
+        self.close_db_connection(conn)
     
     def get_user_info(self, key=None):
         """Get user profile information"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         if key:
             cursor.execute('SELECT value FROM user_profile WHERE key = ?', (key,))
             result = cursor.fetchone()
-            conn.close()
-            return result[0] if result else None
+            self.close_db_connection(conn)
+            return result['value'] if result else None
         else:
             cursor.execute('SELECT key, value FROM user_profile')
             results = cursor.fetchall()
-            conn.close()
-            return dict(results)
+            self.close_db_connection(conn)
+            return {row['key']: row['value'] for row in results}
     
     def delete_user_info(self, key):
         """Delete user profile information"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        conn, cursor = self.get_db_connection()
         
         cursor.execute('DELETE FROM user_profile WHERE key = ?', (key,))
         
-        conn.commit()
-        conn.close()
+        self.close_db_connection(conn)
 
 # Initialize memory manager
 memory = MemoryManager()
